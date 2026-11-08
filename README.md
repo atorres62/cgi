@@ -9,7 +9,7 @@ No necesita servidor de base de datos ni tienda de aplicaciones.
 | **Personas** | Nombre, apellido paterno, apellido materno, teléfono, email, número de casa (alfanumérico), género y tipo (titular, arrendatario, esposa, hijo, sobrino, nieto, bisnieto, otro). Muestra el estado de cuenta de cada persona. |
 | **Ingresos** | Tipo (aportación mensual, reparación de lámparas, etc.), cantidad a aportar (tomada del tipo de ingreso), aportación, **adeudo = cantidad a aportar − aportación**, fecha. Si se aporta de más, la diferencia aparece como **saldo a favor**. Botón **Abonar** para pagar el adeudo después. |
 | **Gastos** | Tipo de gasto, fecha, importe gastado y descripción. |
-| **Recibos** | Se generan solos al registrar un ingreso o un abono: folio consecutivo, fecha, nombre, concepto/tipo, importe y adeudo. Se pueden imprimir/guardar como PDF, o **enviar por WhatsApp como imagen** (con la firma). |
+| **Recibos** | Se generan solos al registrar un ingreso o un abono: folio consecutivo, fecha, nombre, concepto/tipo, importe y adeudo. Se pueden imprimir/guardar como PDF, o **enviar por WhatsApp como imagen** (con la firma). Botón **🔎 Folio** para consultar un recibo por su número. **Cancelar recibo** regresa el importe al adeudo del ingreso; el folio queda marcado como CANCELADO y no se vuelve a usar. |
 | **Inicio** | Totales del mes (o de todo el periodo), saldo en caja y lista de adeudos. |
 
 En ⚙︎ **Configuración**: nombre de la asociación, **persona que recibe con su cargo y su firma digital**

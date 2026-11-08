@@ -129,7 +129,10 @@ const VIEWS = {
       `<label class="check"><input type="checkbox" data-filter="soloAdeudo" ${state.soloAdeudo ? 'checked' : ''}> Solo con adeudo</label>`
   },
   gastos: { t: 'Gastos', list: listGastos, fab: () => formGasto(), ctl: () => ctlMes() + ctlBuscar('Buscar tipo o descripción…') },
-  recibos: { t: 'Recibos de ingreso', list: listRecibos, ctl: () => ctlMes() + ctlBuscar('Buscar folio, nombre, concepto…') },
+  recibos: {
+    t: 'Recibos de ingreso', list: listRecibos,
+    ctl: () => ctlMes() + `<div class="filtros">${ctlBuscar('Buscar folio, nombre, concepto…')}<button class="btn" data-act="buscarFolio">🔎 Folio</button></div>`
+  },
 };
 
 function go(v) { closeModal(); state.view = v; state.q = ''; window.scrollTo(0, 0); render(); }
@@ -428,6 +431,7 @@ async function delGasto(id) {
 }
 
 /* ================= Recibos ================= */
+// Los folios son consecutivos y nunca se reutilizan (un folio cancelado queda cancelado).
 async function crearRecibo(ing, persona, importe, fecha) {
   const folio = (+cfg.folio || 0) + 1;
   await setCfg('folio', folio);
@@ -475,16 +479,56 @@ async function verRecibo(id) {
         <dt>Importe recibido</dt><dd class="grande">${money(r.importe)}</dd>
         <dt>${r.adeudo < 0 ? 'Saldo a favor' : 'Adeudo'}</dt><dd class="${r.adeudo > 0 ? 'neg' : r.adeudo < 0 ? 'pos' : ''}">${money(Math.abs(r.adeudo))}</dd>
       </dl>
-      ${r.cancelado ? '<div class="sello">CANCELADO</div>' : ''}
+      ${r.cancelado ? `<div class="sello">CANCELADO</div>${r.fechaCancelacion ? `<p class="nota no-print">Cancelado el ${fmtFecha(r.fechaCancelacion)}${r.motivoCancelacion ? ' · Motivo: ' + esc(r.motivoCancelacion) : ''}</p>` : ''}` : ''}
       <div class="firma">${q.firma ? `<img class="firma-img" src="${q.firma}" alt="Firma">` : ''}<div class="linea"></div>
         ${q.nombre ? `<b>${esc(q.nombre)}</b>` : ''}${q.cargo ? `<small>${esc(q.cargo)}</small>` : ''}<span>Recibió</span></div>
     </div>
     <div class="acciones no-print">
       <button class="btn" data-act="print">Imprimir / PDF</button>
       <button class="btn wa" data-act="compartirRecibo" data-id="${r.id}">💬 Enviar por WhatsApp</button>
+      ${r.cancelado ? '' : `<button class="btn danger" data-act="cancelarRecibo" data-id="${r.id}">Cancelar recibo</button>`}
       <button class="btn primary" data-act="close">Cerrar</button>
     </div>`);
   prepararImagenRecibo(r).catch(() => { reciboImg = null; });
+}
+
+/* ---- Consulta por folio ---- */
+function buscarFolio() {
+  openModal(`<form><h2>Consultar recibo por folio</h2>
+    ${fld('Número de folio', 'folio', '', 'type="number" min="1" step="1" inputmode="numeric" required autofocus')}
+    <div class="acciones"><button type="button" class="btn" data-act="close">Cancelar</button><button class="btn primary">Buscar</button></div>
+  </form>`, async d => {
+    const n = parseInt(d.folio, 10);
+    const r = (await all('recibos')).find(r => r.folio === n);
+    if (!r) { toast(`No existe el folio ${folioTxt(n || 0)}`); return false; }
+    return () => verRecibo(r.id);
+  });
+}
+
+/* ---- Cancelación: regresa el importe al adeudo del ingreso; el folio queda cancelado (no se reutiliza) ---- */
+async function cancelarRecibo(id) {
+  const r = await get('recibos', id);
+  if (!r || r.cancelado) return;
+  const i = r.ingresoId ? await get('ingresos', r.ingresoId) : null;
+  openModal(`<form><h2>Cancelar recibo ${folioTxt(r.folio)}</h2>
+    <p>${esc(r.nombre)} · ${esc(r.concepto)} · ${fmtFecha(r.fecha)}<br>Importe: <b>${money(r.importe)}</b></p>
+    <p class="nota">${i ? `El importe regresará al adeudo: el ingreso quedará con <b>${txtAdeudo(round2(adeudoDe(i) + r.importe))}</b>.` : 'El ingreso de este recibo ya no existe; solo se marcará como cancelado.'}
+      El folio ${folioTxt(r.folio)} quedará CANCELADO y no se volverá a usar. Esta acción no se puede deshacer.</p>
+    ${fld('Motivo de la cancelación (opcional)', 'motivo', '')}
+    <div class="acciones"><button type="button" class="btn" data-act="close">No cancelar</button><button class="btn danger">Cancelar recibo</button></div>
+  </form>`, async d => {
+    if (i) {
+      i.aportacion = Math.max(0, round2(i.aportacion - r.importe));
+      i.adeudo = adeudoDe(i);
+      const k = (i.abonos || []).findIndex(a => a.fecha === r.fecha && round2(a.monto) === round2(r.importe));
+      if (k >= 0) i.abonos.splice(k, 1);
+      await put('ingresos', i);
+    }
+    Object.assign(r, { cancelado: true, fechaCancelacion: hoy(), motivoCancelacion: d.motivo.trim() });
+    await put('recibos', r);
+    toast(`Recibo ${folioTxt(r.folio)} cancelado · importe regresado al adeudo`);
+    return () => verRecibo(r.id);
+  });
 }
 
 /* ---- Recibo como imagen (PNG) ---- */
@@ -781,7 +825,7 @@ async function exportCSV(s) {
       ['Adeudo', p => sum(ingresosDe(p.id), deuda)]],
     ingresos: [['Fecha', 'fecha'], ['Casa', r => pm[r.personaId]?.numCasa], ['Persona', r => nombreCompleto(pm[r.personaId])], ['Tipo', 'tipo'], ['Cantidad a aportar', 'cantidad'], ['Aportación', 'aportacion'], ['Adeudo', adeudoDe], ['Nota', 'nota']],
     gastos: [['Fecha', 'fecha'], ['Tipo de gasto', 'tipo'], ['Importe', 'importe'], ['Descripción', 'descripcion']],
-    recibos: [['Folio', r => folioTxt(r.folio)], ['Fecha', 'fecha'], ['Nombre', 'nombre'], ['Casa', 'casa'], ['Concepto', 'concepto'], ['Importe recibido', 'importe'], ['Adeudo', 'adeudo'], ['Recibió', r => quienRecibe(r).nombre], ['Cargo', r => quienRecibe(r).cargo], ['Cancelado', r => r.cancelado ? 'Sí' : '']],
+    recibos: [['Folio', r => folioTxt(r.folio)], ['Fecha', 'fecha'], ['Nombre', 'nombre'], ['Casa', 'casa'], ['Concepto', 'concepto'], ['Importe recibido', 'importe'], ['Adeudo', 'adeudo'], ['Recibió', r => quienRecibe(r).nombre], ['Cargo', r => quienRecibe(r).cargo], ['Cancelado', r => r.cancelado ? 'Sí' : ''], ['Fecha cancelación', 'fechaCancelacion'], ['Motivo cancelación', 'motivoCancelacion']],
   }[s];
   const cell = v => { v = String(v ?? ''); return /[",\n\r;]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
   const csv = '﻿' + [defs.map(c => c[0]).join(','), ...rows.map(r => defs.map(([, f]) => cell(typeof f === 'function' ? f(r) : r[f])).join(','))].join('\r\n');
@@ -797,7 +841,7 @@ const ACT = {
   verPersona: async id => formPersona(await get('personas', id)),
   editIngreso: async id => formIngreso(await get('ingresos', id)),
   editGasto: async id => formGasto(await get('gastos', id)),
-  delPersona, delIngreso, delGasto, abonar, verRecibo, compartirRecibo, listadoPersonas,
+  delPersona, delIngreso, delGasto, abonar, verRecibo, compartirRecibo, listadoPersonas, buscarFolio, cancelarRecibo,
   print: () => window.print(),
   addTipoIng: () => { $('#tiposIng').insertAdjacentHTML('beforeend', rowTipo({ nombre: '', cantidad: 0 })); $('#tiposIng .tipo-row:last-child input').focus(); },
   delRow: (_, el) => el.closest('.tipo-row').remove(),
