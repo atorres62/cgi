@@ -96,6 +96,7 @@ form label { display: flex; flex-direction: column; gap: 4px; font-size: .85rem;
 .btn { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--txt); padding: 10px 16px; border-radius: 10px;
   cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; }
 .btn.primary { background: var(--pri); border-color: var(--pri); color: #fff; font-weight: 600; }
+.btn.wa { background: #25d366; border-color: #25d366; color: #fff; font-weight: 600; }
 .btn.danger { color: var(--neg); margin-right: auto; }
 
 #toast { position: fixed; left: 50%; bottom: calc(150px + env(safe-area-inset-bottom)); transform: translate(-50%, 20px); opacity: 0;

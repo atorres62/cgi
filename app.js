@@ -454,13 +454,6 @@ async function listRecibos() {
 
 // Quién recibió: el guardado en el recibo; los recibos anteriores a esta función usan la configuración actual.
 const quienRecibe = r => ({ nombre: r.recibio ?? cfg.recibe, cargo: r.cargoRecibio ?? cfg.cargoRecibe, firma: firmaUrl(r.firmaId ?? cfg.firmaId) });
-const reciboTexto = r => {
-  const q = quienRecibe(r);
-  return `${cfg.org}\nRECIBO DE INGRESO · Folio ${folioTxt(r.folio)}${r.cancelado ? ' (CANCELADO)' : ''}\n` +
-    `Fecha: ${fmtFecha(r.fecha)}\nRecibí de: ${r.nombre}\nCasa: ${r.casa}\nConcepto: ${r.concepto}\n` +
-    `Importe recibido: ${money(r.importe)}\n${txtAdeudo(r.adeudo)}` +
-    (q.nombre ? `\nRecibió: ${q.nombre}${q.cargo ? ' (' + q.cargo + ')' : ''}` : '');
-};
 const waLink = (tel, text) => {
   let d = String(tel).replace(/\D/g, '');
   if (d.length === 10) d = '52' + d; // número mexicano a 10 dígitos
@@ -469,7 +462,6 @@ const waLink = (tel, text) => {
 
 async function verRecibo(id) {
   const r = await get('recibos', id);
-  const p = await get('personas', r.personaId);
   const q = quienRecibe(r);
   openModal(`<div class="recibo print-area ${r.cancelado ? 'cancelado' : ''}">
       <div class="r-head"><div><strong>${esc(cfg.org)}</strong><div class="r-tit">RECIBO DE INGRESO</div></div>
@@ -489,8 +481,7 @@ async function verRecibo(id) {
     </div>
     <div class="acciones no-print">
       <button class="btn" data-act="print">Imprimir / PDF</button>
-      <button class="btn" data-act="compartirRecibo" data-id="${r.id}">📤 Compartir imagen</button>
-      ${p?.telefono ? `<a class="btn" target="_blank" rel="noopener" href="${waLink(p.telefono, reciboTexto(r))}">WhatsApp (texto)</a>` : ''}
+      <button class="btn wa" data-act="compartirRecibo" data-id="${r.id}">💬 Enviar por WhatsApp</button>
       <button class="btn primary" data-act="close">Cerrar</button>
     </div>`);
   prepararImagenRecibo(r).catch(() => { reciboImg = null; });
@@ -595,7 +586,8 @@ async function compartirRecibo(id) {
   if (reciboImg?.id !== id) { toast('Preparando imagen…'); await prepararImagenRecibo(await get('recibos', id)); }
   const { file } = reciboImg;
   if (navigator.canShare?.({ files: [file] })) {
-    try { await navigator.share({ files: [file], title: file.name.replace('.png', '') }); return; }
+    // Solo el archivo: sin título ni texto, para que WhatsApp envíe únicamente la imagen.
+    try { await navigator.share({ files: [file] }); return; }
     catch (e) { if (e.name === 'AbortError') return; }
   }
   // Sin soporte para compartir archivos (p. ej. en PC): se descarga la imagen.
