@@ -80,7 +80,12 @@ const tipoIng = nombre => cfg.tiposIngreso.find(t => t.nombre === nombre);
 const cantidadTipo = nombre => +tipoIng(nombre)?.cantidad || 0;
 
 /* ================= Estado y navegación ================= */
-const state = { view: 'inicio', mes: hoy().slice(0, 7), q: '', soloAdeudo: false, tipoPersona: '' };
+const state = { view: 'inicio', mes: hoy().slice(0, 7), q: '', soloAdeudo: false, tipoPersona: '', estadoPago: '' };
+const ESTADOS_PAGO = [['', 'Todos'], ['adeudo', 'Con adeudo'], ['pagados', 'Pagados']];
+// Filtros de la pestaña Personas (también los usa el listado completo).
+const pasaFiltroPersona = (p, adeudo) => (!state.tipoPersona || p.tipo === state.tipoPersona)
+  && (!state.estadoPago || (state.estadoPago === 'adeudo' ? adeudo > 0 : adeudo <= 0))
+  && match(state.q, nombreCompleto(p), p.numCasa, p.telefono, p.email, p.tipo);
 const enMes = r => !state.mes || (r.fecha || '').startsWith(state.mes);
 
 const ctlMes = () => `<div class="filtros">
@@ -94,7 +99,8 @@ const VIEWS = {
     t: 'Personas', list: listPersonas, fab: () => formPersona(),
     ctl: () => ctlBuscar('Buscar nombre, casa, teléfono…') +
       `<div class="filtros"><select class="buscar" data-filter="tipoPersona"><option value="">Todos los tipos</option>${TIPOS_PERSONA.map(t => `<option ${t === state.tipoPersona ? 'selected' : ''}>${t}</option>`).join('')}</select>
-       <button class="btn" data-act="listadoPersonas">📋 Listado completo</button></div>`
+       <button class="btn" data-act="listadoPersonas">📋 Listado completo</button></div>
+       <div class="seg">${ESTADOS_PAGO.map(([v, t]) => `<button class="chip ${state.estadoPago === v ? 'on' : ''}" data-act="estadoPago" data-id="${v}">${t}</button>`).join('')}</div>`
   },
   ingresos: {
     t: 'Ingresos', list: listIngresos, fab: () => formIngreso(),
@@ -189,9 +195,8 @@ async function listPersonas() {
   const [per, ing] = await Promise.all([all('personas'), all('ingresos')]);
   const deud = {};
   ing.forEach(r => { deud[r.personaId] = round2((deud[r.personaId] || 0) + deuda(r)); });
-  const L = per.filter(p => (!state.tipoPersona || p.tipo === state.tipoPersona)
-    && match(state.q, nombreCompleto(p), p.numCasa, p.telefono, p.email, p.tipo)).sort(cmpCasa);
-  if (!L.length) return vacio(per.length ? 'Sin resultados' : 'Aún no hay personas. Toca + para agregar.');
+  const L = per.filter(p => pasaFiltroPersona(p, deud[p.id] || 0)).sort(cmpCasa);
+  if (!L.length) return vacio(per.length ? 'Sin resultados para el filtro' : 'Aún no hay personas. Toca + para agregar.');
   return `<p class="conteo">${L.length} persona(s)</p>` + L.map(p => `
     <div class="card item" data-act="verPersona" data-id="${p.id}">
       <div class="casa">${esc(p.numCasa || '—')}</div>
@@ -244,9 +249,9 @@ async function listadoPersonas(col) {
   const cmp = ordenListado === 'numCasa' ? cmpCasa
     : ordenListado === 'adeudo' ? (a, b) => b.adeudo - a.adeudo || cmpCasa(a, b)
     : (a, b) => String(a[ordenListado] || '').localeCompare(String(b[ordenListado] || ''), 'es', { numeric: true }) || cmpCasa(a, b);
-  const L = per.filter(p => (!state.tipoPersona || p.tipo === state.tipoPersona)
-    && match(state.q, nombreCompleto(p), p.numCasa, p.telefono, p.email, p.tipo)).sort(cmp);
-  const filtro = [state.tipoPersona && 'Tipo: ' + state.tipoPersona, state.q && `Búsqueda: "${state.q}"`].filter(Boolean).join(' · ');
+  const L = per.filter(p => pasaFiltroPersona(p, p.adeudo)).sort(cmp);
+  const filtro = [state.estadoPago && ESTADOS_PAGO.find(e => e[0] === state.estadoPago)[1],
+    state.tipoPersona && 'Tipo: ' + state.tipoPersona, state.q && `Búsqueda: "${state.q}"`].filter(Boolean).join(' · ');
   openModal(`<div class="print-area listado">
       <h2>Listado de personas</h2>
       <p class="nota">${esc(cfg.org)} · ${L.length} persona(s) · ${fmtFecha(hoy())}${filtro ? ' · ' + esc(filtro) : ''}</p>
@@ -770,6 +775,7 @@ async function exportCSV(s) {
 const ACT = {
   close: closeModal,
   config: formConfig,
+  estadoPago: v => { state.estadoPago = v || ''; render(); },
   todoPeriodo: () => { state.mes = state.mes ? '' : hoy().slice(0, 7); render(); },
   verPersona: async id => formPersona(await get('personas', id)),
   editIngreso: async id => formIngreso(await get('ingresos', id)),

@@ -105,6 +105,8 @@ form label { display: flex; flex-direction: column; gap: 4px; font-size: .85rem;
 /* Listado (tabla) */
 dialog.ancho { width: min(1100px, calc(100% - 12px)); }
 .filtros .buscar { flex: 1; }
+.seg { display: flex; gap: 6px; }
+.seg .chip { flex: 1; }
 .tabla-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--line); border-radius: 10px; }
 .tabla { border-collapse: collapse; width: 100%; font-size: .85rem; white-space: nowrap; }
 .tabla th, .tabla td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; }
