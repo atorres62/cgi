@@ -102,6 +102,20 @@ form label { display: flex; flex-direction: column; gap: 4px; font-size: .85rem;
   background: #222; color: #fff; padding: 10px 16px; border-radius: 10px; transition: .25s; pointer-events: none; z-index: 1000; max-width: 90%; text-align: center; }
 #toast.show { opacity: 1; transform: translate(-50%, 0); }
 
+/* Listado (tabla) */
+dialog.ancho { width: min(1100px, calc(100% - 12px)); }
+.filtros .buscar { flex: 1; }
+.tabla-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--line); border-radius: 10px; }
+.tabla { border-collapse: collapse; width: 100%; font-size: .85rem; white-space: nowrap; }
+.tabla th, .tabla td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; }
+.tabla th { background: var(--pri-2); color: var(--pri); cursor: pointer; user-select: none; }
+.tabla th.ord { text-decoration: underline; }
+.tabla tbody tr { cursor: pointer; }
+.tabla tbody tr:nth-child(even) { background: var(--bg); }
+.tabla td.num { text-align: right; }
+.tabla tfoot td { font-weight: 700; border-bottom: 0; }
+.tabla tfoot td:first-child { text-align: right; }
+
 /* Recibo */
 .recibo { position: relative; border: 2px solid var(--pri); border-radius: 12px; padding: 16px; background: var(--card); overflow: hidden; }
 .r-head { display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px dashed var(--line); padding-bottom: 10px; margin-bottom: 10px; }
@@ -131,4 +145,8 @@ form label { display: flex; flex-direction: column; gap: 4px; font-size: .85rem;
   .print-area, .print-area * { visibility: visible; color: #000 !important; }
   .print-area { position: absolute; left: 0; top: 0; width: 100%; border-color: #000; }
   .no-print { display: none; }
+  .tabla-wrap { overflow: visible; border: 0; }
+  .tabla { font-size: 10pt; white-space: normal; }
+  .tabla th { background: #e8e8e8 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .tabla th, .tabla td { border: 1px solid #999; padding: 4px 6px; }
 }

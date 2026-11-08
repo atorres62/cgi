@@ -93,7 +93,8 @@ const VIEWS = {
   personas: {
     t: 'Personas', list: listPersonas, fab: () => formPersona(),
     ctl: () => ctlBuscar('Buscar nombre, casa, teléfono…') +
-      `<select class="buscar" data-filter="tipoPersona"><option value="">Todos los tipos</option>${TIPOS_PERSONA.map(t => `<option ${t === state.tipoPersona ? 'selected' : ''}>${t}</option>`).join('')}</select>`
+      `<div class="filtros"><select class="buscar" data-filter="tipoPersona"><option value="">Todos los tipos</option>${TIPOS_PERSONA.map(t => `<option ${t === state.tipoPersona ? 'selected' : ''}>${t}</option>`).join('')}</select>
+       <button class="btn" data-act="listadoPersonas">📋 Listado completo</button></div>`
   },
   ingresos: {
     t: 'Ingresos', list: listIngresos, fab: () => formIngreso(),
@@ -139,6 +140,7 @@ function toast(m) {
 function closeModal() { const m = $('#modal'); if (m.open) m.close(); }
 /* onSubmit: devuelve false para no cerrar; o una función para ejecutar tras cerrar */
 function openModal(html, onSubmit) {
+  $('#modal').classList.remove('ancho');
   $('#modalBody').innerHTML = html;
   const f = $('#modalBody form');
   if (f && onSubmit) f.onsubmit = async e => {
@@ -226,6 +228,43 @@ async function formPersona(p = {}) {
     await put('personas', { ...p, ...trimAll(d) });
     toast('Persona guardada');
   });
+}
+
+/* ---- Listado completo de personas (tabla) ---- */
+const COLS_PERSONA = [['numCasa', 'Casa'], ['nombre', 'Nombre'], ['apPaterno', 'Apellido paterno'], ['apMaterno', 'Apellido materno'],
+  ['tipo', 'Tipo'], ['genero', 'Género'], ['telefono', 'Teléfono'], ['email', 'Email'], ['adeudo', 'Adeudo']];
+let ordenListado = 'numCasa';
+
+async function listadoPersonas(col) {
+  if (typeof col === 'string' && col) ordenListado = col;
+  const [per, ing] = await Promise.all([all('personas'), all('ingresos')]);
+  const deud = {};
+  ing.forEach(r => { deud[r.personaId] = round2((deud[r.personaId] || 0) + deuda(r)); });
+  per.forEach(p => { p.adeudo = deud[p.id] || 0; });
+  const cmp = ordenListado === 'numCasa' ? cmpCasa
+    : ordenListado === 'adeudo' ? (a, b) => b.adeudo - a.adeudo || cmpCasa(a, b)
+    : (a, b) => String(a[ordenListado] || '').localeCompare(String(b[ordenListado] || ''), 'es', { numeric: true }) || cmpCasa(a, b);
+  const L = per.filter(p => (!state.tipoPersona || p.tipo === state.tipoPersona)
+    && match(state.q, nombreCompleto(p), p.numCasa, p.telefono, p.email, p.tipo)).sort(cmp);
+  const filtro = [state.tipoPersona && 'Tipo: ' + state.tipoPersona, state.q && `Búsqueda: "${state.q}"`].filter(Boolean).join(' · ');
+  openModal(`<div class="print-area listado">
+      <h2>Listado de personas</h2>
+      <p class="nota">${esc(cfg.org)} · ${L.length} persona(s) · ${fmtFecha(hoy())}${filtro ? ' · ' + esc(filtro) : ''}</p>
+      <div class="tabla-wrap"><table class="tabla">
+        <thead><tr><th>#</th>${COLS_PERSONA.map(([k, t]) => `<th data-act="listadoPersonas" data-id="${k}" class="${k === ordenListado ? 'ord' : ''}">${t}${k === ordenListado ? ' ▾' : ''}</th>`).join('')}</tr></thead>
+        <tbody>${L.map((p, n) => `<tr data-act="verPersona" data-id="${p.id}"><td>${n + 1}</td>${COLS_PERSONA.map(([k]) =>
+          k === 'adeudo' ? `<td class="num ${p.adeudo > 0 ? 'neg' : ''}">${money(p.adeudo)}</td>` : `<td>${esc(p[k] || '')}</td>`).join('')}</tr>`).join('')
+          || `<tr><td colspan="${COLS_PERSONA.length + 1}" class="vacio">Sin personas</td></tr>`}</tbody>
+        ${L.length ? `<tfoot><tr><td colspan="${COLS_PERSONA.length}">Total adeudo</td><td class="num neg">${money(sum(L, 'adeudo'))}</td></tr></tfoot>` : ''}
+      </table></div>
+      <p class="nota no-print">Toca el encabezado de una columna para ordenar, o una fila para editar a la persona.</p>
+    </div>
+    <div class="acciones no-print">
+      <button class="btn" data-act="print">Imprimir / PDF</button>
+      <button class="btn" data-act="exportCSV" data-id="personas">Exportar a Excel</button>
+      <button class="btn primary" data-act="close">Cerrar</button>
+    </div>`);
+  $('#modal').classList.add('ancho');
 }
 
 async function delPersona(id) {
@@ -711,10 +750,13 @@ function importJSON() {
 }
 
 async function exportCSV(s) {
-  const [rows, per] = await Promise.all([all(s), all('personas')]);
+  const [rows, per, ing] = await Promise.all([all(s), all('personas'), all('ingresos')]);
   const pm = mapById(per);
+  const ingresosDe = pid => ing.filter(i => i.personaId === pid);
+  if (s === 'personas') rows.sort(cmpCasa);
   const defs = {
-    personas: [['Casa', 'numCasa'], ['Nombre', 'nombre'], ['Apellido paterno', 'apPaterno'], ['Apellido materno', 'apMaterno'], ['Tipo', 'tipo'], ['Género', 'genero'], ['Teléfono', 'telefono'], ['Email', 'email']],
+    personas: [['Casa', 'numCasa'], ['Nombre', 'nombre'], ['Apellido paterno', 'apPaterno'], ['Apellido materno', 'apMaterno'], ['Tipo', 'tipo'], ['Género', 'genero'], ['Teléfono', 'telefono'], ['Email', 'email'],
+      ['Adeudo', p => sum(ingresosDe(p.id), deuda)]],
     ingresos: [['Fecha', 'fecha'], ['Casa', r => pm[r.personaId]?.numCasa], ['Persona', r => nombreCompleto(pm[r.personaId])], ['Tipo', 'tipo'], ['Cantidad a aportar', 'cantidad'], ['Aportación', 'aportacion'], ['Adeudo', adeudoDe], ['Nota', 'nota']],
     gastos: [['Fecha', 'fecha'], ['Tipo de gasto', 'tipo'], ['Importe', 'importe'], ['Descripción', 'descripcion']],
     recibos: [['Folio', r => folioTxt(r.folio)], ['Fecha', 'fecha'], ['Nombre', 'nombre'], ['Casa', 'casa'], ['Concepto', 'concepto'], ['Importe recibido', 'importe'], ['Adeudo', 'adeudo'], ['Recibió', r => quienRecibe(r).nombre], ['Cargo', r => quienRecibe(r).cargo], ['Cancelado', r => r.cancelado ? 'Sí' : '']],
@@ -732,7 +774,7 @@ const ACT = {
   verPersona: async id => formPersona(await get('personas', id)),
   editIngreso: async id => formIngreso(await get('ingresos', id)),
   editGasto: async id => formGasto(await get('gastos', id)),
-  delPersona, delIngreso, delGasto, abonar, verRecibo, compartirRecibo,
+  delPersona, delIngreso, delGasto, abonar, verRecibo, compartirRecibo, listadoPersonas,
   print: () => window.print(),
   addTipoIng: () => { $('#tiposIng').insertAdjacentHTML('beforeend', rowTipo({ nombre: '', cantidad: 0 })); $('#tiposIng .tipo-row:last-child input').focus(); },
   delRow: (_, el) => el.closest('.tipo-row').remove(),
