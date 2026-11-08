@@ -501,9 +501,8 @@ async function verRecibo(id) {
         <dt>${r.adeudo < 0 ? 'Saldo a favor' : 'Adeudo'}</dt><dd class="${r.adeudo > 0 ? 'neg' : r.adeudo < 0 ? 'pos' : ''}">${money(Math.abs(r.adeudo))}</dd>
       </dl>
       ${r.cancelado ? `<div class="sello">CANCELADO</div>${r.fechaCancelacion ? `<p class="nota no-print">Cancelado el ${fmtFecha(r.fechaCancelacion)}${r.motivoCancelacion ? ' · Motivo: ' + esc(r.motivoCancelacion) : ''}</p>` : ''}` : ''}
-      <div class="firma">${q.firma ? `<img class="firma-img" src="${q.firma}" alt="Firma">` : ''}<div class="linea"></div>
-        ${q.nombre ? `<b>${esc(q.nombre)}</b>` : ''}${q.cargo ? `<small>${esc(q.cargo)}</small>` : ''}<span>Recibió</span>
-        ${r.uuid ? `<small class="uuid">UUID: ${esc(r.uuid)}</small>` : ''}</div>
+      <div class="firma">${q.firma ? `<img class="firma-img" src="${q.firma}" alt="Firma">` : ''}${r.uuid ? `<small class="uuid">${esc(r.uuid)}</small>` : ''}<div class="linea"></div>
+        ${q.nombre ? `<b>${esc(q.nombre)}</b>` : ''}${q.cargo ? `<small>${esc(q.cargo)}</small>` : ''}<span>Recibió</span></div>
     </div>
     <div class="acciones no-print">
       <button class="btn" data-act="print">Imprimir / PDF</button>
@@ -575,7 +574,8 @@ async function reciboCanvas(r) {
     [r.adeudo < 0 ? 'Saldo a favor' : 'Adeudo', money(Math.abs(r.adeudo)), r.adeudo > 0 ? 'neg' : r.adeudo < 0 ? 'pos' : ''],
   ];
   const altoFirma = firma ? 90 : 50;
-  const H = P + 96 + filas.length * 40 + 24 + altoFirma + 76 + (r.uuid ? 26 : 0) + P;
+  const altoUUID = r.uuid ? 20 : 0;
+  const H = P + 96 + filas.length * 40 + 24 + altoFirma + altoUUID + 76 + P;
   const c = document.createElement('canvas');
   c.width = W * ESC; c.height = H * ESC;
   const x = c.getContext('2d');
@@ -613,12 +613,14 @@ async function reciboCanvas(r) {
 
   // Firma
   y += 24;
-  const lineaY = y + altoFirma - 10;
+  const lineaY = y + altoFirma + altoUUID - 10;
   if (firma) {
     const s = Math.min(280 / firma.width, 84 / firma.height, 1.6);
     const fw = firma.width * s, fh = firma.height * s;
-    x.drawImage(firma, (W - fw) / 2, lineaY - fh + 8, fw, fh);
+    x.drawImage(firma, (W - fw) / 2, lineaY - altoUUID - fh + 8, fw, fh);
   }
+  // UUID justo encima de la línea de firma
+  if (r.uuid) { x.textAlign = 'center'; x.fillStyle = C.gris; x.fillText(fitText(x, r.uuid, W - 2 * P, 12, '', 9), W / 2, lineaY - 6); }
   x.strokeStyle = C.tinta; x.lineWidth = 1;
   x.beginPath(); x.moveTo(W * 0.2, lineaY); x.lineTo(W * 0.8, lineaY); x.stroke();
   x.textAlign = 'center'; y = lineaY + 22;
@@ -626,7 +628,6 @@ async function reciboCanvas(r) {
   x.fillStyle = C.gris; x.font = '13px system-ui, sans-serif';
   if (q.cargo) { x.fillText(q.cargo, W / 2, y); y += 18; }
   x.fillText('Recibió', W / 2, y);
-  if (r.uuid) { y += 26; x.font = '12px ui-monospace, Consolas, monospace'; x.fillText(fitText(x, 'UUID: ' + r.uuid, W - 2 * P, 12, '', 9), W / 2, y); }
 
   if (r.cancelado) {
     x.save(); x.translate(W / 2, H / 2); x.rotate(-0.3);
