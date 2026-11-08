@@ -131,7 +131,7 @@ const VIEWS = {
   gastos: { t: 'Gastos', list: listGastos, fab: () => formGasto(), ctl: () => ctlMes() + ctlBuscar('Buscar tipo o descripción…') },
   recibos: {
     t: 'Recibos de ingreso', list: listRecibos,
-    ctl: () => ctlMes() + `<div class="filtros">${ctlBuscar('Buscar folio, nombre, concepto…')}<button class="btn" data-act="buscarFolio">🔎 Folio</button></div>`
+    ctl: () => ctlMes() + `<div class="filtros">${ctlBuscar('Buscar folio, nombre, concepto, UUID…')}<button class="btn" data-act="buscarFolio">🔎 Folio</button></div>`
   },
 };
 
@@ -443,12 +443,21 @@ async function delGasto(id) {
 }
 
 /* ================= Recibos ================= */
+// Identificador único universal del recibo (UUID v4).
+const nuevoUUID = () => crypto.randomUUID?.() ?? '10000000-1000-4000-8000-100000000000'.replace(/[018]/g, c =>
+  (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
+
+// Asigna UUID a los recibos creados antes de esta función (o que vienen de un respaldo anterior).
+async function asegurarUUIDs() {
+  for (const r of (await all('recibos')).filter(r => !r.uuid)) { r.uuid = nuevoUUID(); await put('recibos', r); }
+}
+
 // Los folios son consecutivos y nunca se reutilizan (un folio cancelado queda cancelado).
 async function crearRecibo(ing, persona, importe, fecha) {
   const folio = (+cfg.folio || 0) + 1;
   await setCfg('folio', folio);
   const r = {
-    folio, fecha, personaId: ing.personaId, nombre: nombreCompleto(persona), casa: persona?.numCasa || '',
+    uuid: nuevoUUID(), folio, fecha, personaId: ing.personaId, nombre: nombreCompleto(persona), casa: persona?.numCasa || '',
     concepto: ing.tipo, cantidad: ing.cantidad, importe, adeudo: adeudoDe(ing), ingresoId: ing.id, creado: new Date().toISOString(),
     recibio: cfg.recibe, cargoRecibio: cfg.cargoRecibe, firmaId: cfg.firmaId
   };
@@ -458,7 +467,7 @@ async function crearRecibo(ing, persona, importe, fecha) {
 
 async function listRecibos() {
   const rs = await all('recibos');
-  const L = rs.filter(r => enMes(r) && match(state.q, folioTxt(r.folio), r.nombre, r.casa, r.concepto)).sort((a, b) => b.folio - a.folio);
+  const L = rs.filter(r => enMes(r) && match(state.q, folioTxt(r.folio), r.nombre, r.casa, r.concepto, r.uuid)).sort((a, b) => b.folio - a.folio);
   if (!L.length) return vacio(rs.length ? 'Sin resultados para el filtro' : 'Los recibos se generan automáticamente al registrar un ingreso o un abono.');
   return L.map(r => `
     <div class="card item ${r.cancelado ? 'tachado' : ''}" data-act="verRecibo" data-id="${r.id}">
@@ -493,7 +502,8 @@ async function verRecibo(id) {
       </dl>
       ${r.cancelado ? `<div class="sello">CANCELADO</div>${r.fechaCancelacion ? `<p class="nota no-print">Cancelado el ${fmtFecha(r.fechaCancelacion)}${r.motivoCancelacion ? ' · Motivo: ' + esc(r.motivoCancelacion) : ''}</p>` : ''}` : ''}
       <div class="firma">${q.firma ? `<img class="firma-img" src="${q.firma}" alt="Firma">` : ''}<div class="linea"></div>
-        ${q.nombre ? `<b>${esc(q.nombre)}</b>` : ''}${q.cargo ? `<small>${esc(q.cargo)}</small>` : ''}<span>Recibió</span></div>
+        ${q.nombre ? `<b>${esc(q.nombre)}</b>` : ''}${q.cargo ? `<small>${esc(q.cargo)}</small>` : ''}<span>Recibió</span>
+        ${r.uuid ? `<small class="uuid">UUID: ${esc(r.uuid)}</small>` : ''}</div>
     </div>
     <div class="acciones no-print">
       <button class="btn" data-act="print">Imprimir / PDF</button>
@@ -565,7 +575,7 @@ async function reciboCanvas(r) {
     [r.adeudo < 0 ? 'Saldo a favor' : 'Adeudo', money(Math.abs(r.adeudo)), r.adeudo > 0 ? 'neg' : r.adeudo < 0 ? 'pos' : ''],
   ];
   const altoFirma = firma ? 90 : 50;
-  const H = P + 96 + filas.length * 40 + 24 + altoFirma + 76 + P;
+  const H = P + 96 + filas.length * 40 + 24 + altoFirma + 76 + (r.uuid ? 26 : 0) + P;
   const c = document.createElement('canvas');
   c.width = W * ESC; c.height = H * ESC;
   const x = c.getContext('2d');
@@ -616,6 +626,7 @@ async function reciboCanvas(r) {
   x.fillStyle = C.gris; x.font = '13px system-ui, sans-serif';
   if (q.cargo) { x.fillText(q.cargo, W / 2, y); y += 18; }
   x.fillText('Recibió', W / 2, y);
+  if (r.uuid) { y += 26; x.font = '12px ui-monospace, Consolas, monospace'; x.fillText(fitText(x, 'UUID: ' + r.uuid, W - 2 * P, 12, '', 9), W / 2, y); }
 
   if (r.cancelado) {
     x.save(); x.translate(W / 2, H / 2); x.rotate(-0.3);
@@ -824,7 +835,7 @@ function importJSON() {
       await tx(STORES, 'readwrite', t => {
         for (const s of STORES) { const st = t.objectStore(s); st.clear(); (data[s] || []).forEach(o => st.put(o)); }
       });
-      await loadConfig(); await setCfg('ultimoRespaldo', hoy()); // los datos ahora coinciden con un archivo de respaldo
+      await loadConfig(); await asegurarUUIDs(); await setCfg('ultimoRespaldo', hoy()); // los datos ahora coinciden con un archivo de respaldo
       closeModal(); toast('Respaldo restaurado'); render();
     } catch (e) { alert('No se pudo restaurar: ' + e.message); }
   };
@@ -842,7 +853,7 @@ async function exportCSV(s) {
       ['Adeudo', p => sum(ingresosDe(p.id), deuda)]],
     ingresos: [['Fecha', 'fecha'], ['Casa', r => pm[r.personaId]?.numCasa], ['Persona', r => nombreCompleto(pm[r.personaId])], ['Tipo', 'tipo'], ['Cantidad a aportar', 'cantidad'], ['Aportación', 'aportacion'], ['Adeudo', adeudoDe], ['Nota', 'nota']],
     gastos: [['Fecha', 'fecha'], ['Tipo de gasto', 'tipo'], ['Importe', 'importe'], ['Descripción', 'descripcion']],
-    recibos: [['Folio', r => folioTxt(r.folio)], ['Fecha', 'fecha'], ['Nombre', 'nombre'], ['Casa', 'casa'], ['Concepto', 'concepto'], ['Importe recibido', 'importe'], ['Adeudo', 'adeudo'], ['Recibió', r => quienRecibe(r).nombre], ['Cargo', r => quienRecibe(r).cargo], ['Cancelado', r => r.cancelado ? 'Sí' : ''], ['Fecha cancelación', 'fechaCancelacion'], ['Motivo cancelación', 'motivoCancelacion']],
+    recibos: [['Folio', r => folioTxt(r.folio)], ['UUID', 'uuid'], ['Fecha', 'fecha'], ['Nombre', 'nombre'], ['Casa', 'casa'], ['Concepto', 'concepto'], ['Importe recibido', 'importe'], ['Adeudo', 'adeudo'], ['Recibió', r => quienRecibe(r).nombre], ['Cargo', r => quienRecibe(r).cargo], ['Cancelado', r => r.cancelado ? 'Sí' : ''], ['Fecha cancelación', 'fechaCancelacion'], ['Motivo cancelación', 'motivoCancelacion']],
   }[s];
   const cell = v => { v = String(v ?? ''); return /[",\n\r;]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
   const csv = '﻿' + [defs.map(c => c[0]).join(','), ...rows.map(r => defs.map(([, f]) => cell(typeof f === 'function' ? f(r) : r[f])).join(','))].join('\r\n');
@@ -892,6 +903,7 @@ $('#fab').addEventListener('click', () => VIEWS[state.view].fab?.());
   try {
     await dbReady;
     await loadConfig();
+    await asegurarUUIDs();
     navigator.storage?.persist?.();
     await render();
   } catch (e) {
