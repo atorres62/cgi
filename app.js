@@ -200,7 +200,7 @@ async function listInicio() {
   const deud = {};
   ing.forEach(r => { const a = adeudoDe(r); if (a > 0) deud[r.personaId] = round2((deud[r.personaId] || 0) + a); });
   const deudores = Object.entries(deud).sort((a, b) => b[1] - a[1]);
-  return `<div class="kpis">
+  return avisoRespaldo(per.length + ing.length + gas.length) + `<div class="kpis">
       ${kpi('Ingresos', totI, 'pos')}${kpi('Gastos', totG, 'neg')}
       ${kpi('Balance del periodo', round2(totI - totG))}${kpi('Adeudo del periodo', sum(i, deuda), 'neg')}
     </div>
@@ -212,6 +212,18 @@ async function listInicio() {
       const p = pm[pid];
       return `<div class="fila" data-act="verPersona" data-id="${pid}"><span>${p ? `<b>Casa ${esc(p.numCasa)}</b> · ${esc(nombreCompleto(p))}` : '(persona eliminada)'}</span><span class="neg">${money(a)}</span></div>`;
     }).join('')}</div>` : vacio('Sin adeudos pendientes 🎉')}`;
+}
+
+/* ---- Aviso de respaldo: si hay datos y pasaron DIAS_RESPALDO días (o nunca se respaldó) ---- */
+const DIAS_RESPALDO = 7;
+const diasDesde = f => Math.floor((Date.parse(hoy()) - Date.parse(f)) / 864e5);
+function avisoRespaldo(nDatos) {
+  const ult = cfg.ultimoRespaldo;
+  if (!nDatos || cfg.respaldoPospuesto === hoy() || (ult && diasDesde(ult) < DIAS_RESPALDO)) return '';
+  const msg = ult ? `Tu último respaldo fue hace <b>${diasDesde(ult)} días</b> (${fmtFecha(ult)}).` : 'Aún <b>no has descargado ningún respaldo</b>.';
+  return `<div class="card aviso-respaldo">
+    <p>⚠️ ${msg} Los datos solo están en este dispositivo: si se borra el navegador o se pierde, se pierden.</p>
+    <div class="acciones"><button class="btn" data-act="posponerRespaldo">Recordar mañana</button><button class="btn primary" data-act="exportJSON">⬇ Descargar respaldo</button></div></div>`;
 }
 
 /* ================= Personas ================= */
@@ -758,7 +770,8 @@ function formConfig() {
     ${fld('Último folio emitido (el siguiente recibo usará este + 1)', 'folio', cfg.folio, 'type="number" min="0" step="1" required')}
     <div class="acciones"><button type="button" class="btn" data-act="close">Cancelar</button><button class="btn primary">Guardar</button></div>
     <h3>Respaldo de datos</h3>
-    <p class="nota">La información se guarda únicamente en este celular. Descarga un respaldo con frecuencia y guárdalo en Drive, correo o WhatsApp.</p>
+    <p class="nota">La información se guarda únicamente en este dispositivo. Descarga un respaldo con frecuencia y guárdalo en Drive, correo o WhatsApp.
+      Último respaldo: <b>${cfg.ultimoRespaldo ? fmtFecha(cfg.ultimoRespaldo) : 'nunca'}</b>. Si pasan más de ${DIAS_RESPALDO} días, Inicio mostrará un aviso.</p>
     <div class="botones">
       <button type="button" class="btn" data-act="exportJSON">⬇ Descargar respaldo</button>
       <button type="button" class="btn" data-act="importJSON">⬆ Restaurar respaldo</button>
@@ -791,8 +804,11 @@ function download(name, text, type) {
 
 async function exportJSON() {
   const data = { app: 'CGI', version: 1, exportado: new Date().toISOString() };
+  await setCfg('ultimoRespaldo', hoy());
   for (const s of STORES) data[s] = await all(s);
   download(`respaldo-cgi-${hoy()}.json`, JSON.stringify(data, null, 1), 'application/json');
+  toast('Respaldo descargado · guárdalo en Drive, correo o USB');
+  if (state.view === 'inicio') renderList();
 }
 
 function importJSON() {
@@ -808,7 +824,8 @@ function importJSON() {
       await tx(STORES, 'readwrite', t => {
         for (const s of STORES) { const st = t.objectStore(s); st.clear(); (data[s] || []).forEach(o => st.put(o)); }
       });
-      await loadConfig(); closeModal(); toast('Respaldo restaurado'); render();
+      await loadConfig(); await setCfg('ultimoRespaldo', hoy()); // los datos ahora coinciden con un archivo de respaldo
+      closeModal(); toast('Respaldo restaurado'); render();
     } catch (e) { alert('No se pudo restaurar: ' + e.message); }
   };
   inp.click();
@@ -850,6 +867,7 @@ const ACT = {
   padCerrar: () => $('#padDlg').close(),
   padGuardar: guardarFirma,
   exportJSON, importJSON, exportCSV,
+  posponerRespaldo: async () => { await setCfg('respaldoPospuesto', hoy()); renderList(); },
 };
 document.addEventListener('click', e => {
   const el = e.target.closest('[data-act]');

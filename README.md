@@ -32,7 +32,7 @@ Solo para probar en la red de la casa: en la PC ejecuta `npx serve` dentro de la
 
 ## Importante: respaldos
 Los datos viven solo en el celular donde se capturan. Si se borra la app o los datos del navegador, se pierden.
-Usa **⚙︎ → Descargar respaldo** con frecuencia y guarda el archivo en Drive, correo o WhatsApp.
+Usa **⚙︎ → Descargar respaldo** con frecuencia (si pasan más de 7 días, Inicio muestra un aviso con el botón para descargarlo) y guarda el archivo en Drive, correo o WhatsApp.
 Con **Restaurar respaldo** se pasan los datos a otro celular.
 
 ## Publicar cambios

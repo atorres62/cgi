@@ -154,3 +154,9 @@ dialog.ancho { width: min(1100px, calc(100% - 12px)); }
   .tabla th { background: #e8e8e8 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .tabla th, .tabla td { border: 1px solid #999; padding: 4px 6px; }
 }
+
+/* Aviso de respaldo en Inicio */
+.aviso-respaldo { border-color: #e0a800; background: #fff8e1; color: #5c4400; margin-bottom: 12px; }
+.aviso-respaldo p { margin: 0 0 8px; }
+.aviso-respaldo .acciones { margin: 0; }
+@media (prefers-color-scheme: dark) { .aviso-respaldo { background: #3a2f0b; color: #ffe08a; border-color: #8a6d00; } }
