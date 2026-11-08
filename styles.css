@@ -115,6 +115,7 @@ dialog.ancho { width: min(1100px, calc(100% - 12px)); }
 .tabla tbody tr { cursor: pointer; }
 .tabla tbody tr:nth-child(even) { background: var(--bg); }
 .tabla td.num { text-align: right; }
+.tabla td.detalle { white-space: normal; min-width: 180px; font-size: .8rem; }
 .tabla tfoot td { font-weight: 700; border-bottom: 0; }
 .tabla tfoot td:first-child { text-align: right; }
 

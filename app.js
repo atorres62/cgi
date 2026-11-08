@@ -80,11 +80,30 @@ const tipoIng = nombre => cfg.tiposIngreso.find(t => t.nombre === nombre);
 const cantidadTipo = nombre => +tipoIng(nombre)?.cantidad || 0;
 
 /* ================= Estado y navegación ================= */
-const state = { view: 'inicio', mes: hoy().slice(0, 7), q: '', soloAdeudo: false, tipoPersona: '', estadoPago: '' };
+const state = { view: 'inicio', mes: hoy().slice(0, 7), q: '', soloAdeudo: false, tipoPersona: '', estadoPago: '', tipoIngreso: '' };
 const ESTADOS_PAGO = [['', 'Todos'], ['adeudo', 'Con adeudo'], ['pagados', 'Pagados']];
+
+// Resumen de adeudos por persona: { adeudo, n (ingresos registrados), porTipo: {tipo: importe} }.
+// Si hay filtro de tipo de ingreso, solo considera ese tipo.
+function adeudosPorPersona(ing, tipo = state.tipoIngreso) {
+  const m = {};
+  for (const i of ing) {
+    if (tipo && i.tipo !== tipo) continue;
+    const r = m[i.personaId] ||= { adeudo: 0, n: 0, porTipo: {} };
+    r.n++;
+    const d = deuda(i);
+    if (d > 0) { r.adeudo = round2(r.adeudo + d); r.porTipo[i.tipo] = round2((r.porTipo[i.tipo] || 0) + d); }
+  }
+  return m;
+}
+const SIN_INFO = { adeudo: 0, n: 0, porTipo: {} };
+const detalleAdeudo = info => Object.entries(info.porTipo).map(([t, v]) => `${t} ${money(v)}`).join(' · ')
+  || (state.tipoIngreso && !info.n ? 'Sin registro' : '');
+
 // Filtros de la pestaña Personas (también los usa el listado completo).
-const pasaFiltroPersona = (p, adeudo) => (!state.tipoPersona || p.tipo === state.tipoPersona)
-  && (!state.estadoPago || (state.estadoPago === 'adeudo' ? adeudo > 0 : adeudo <= 0))
+// Con un tipo de ingreso elegido, "Pagados" exige que la persona tenga registrado ese ingreso.
+const pasaFiltroPersona = (p, info) => (!state.tipoPersona || p.tipo === state.tipoPersona)
+  && (!state.estadoPago || (state.estadoPago === 'adeudo' ? info.adeudo > 0 : info.adeudo <= 0 && (!state.tipoIngreso || info.n > 0)))
   && match(state.q, nombreCompleto(p), p.numCasa, p.telefono, p.email, p.tipo);
 const enMes = r => !state.mes || (r.fecha || '').startsWith(state.mes);
 
@@ -97,9 +116,11 @@ const VIEWS = {
   inicio: { t: 'Inicio', ctl: ctlMes, list: listInicio },
   personas: {
     t: 'Personas', list: listPersonas, fab: () => formPersona(),
-    ctl: () => ctlBuscar('Buscar nombre, casa, teléfono…') +
-      `<div class="filtros"><select class="buscar" data-filter="tipoPersona"><option value="">Todos los tipos</option>${TIPOS_PERSONA.map(t => `<option ${t === state.tipoPersona ? 'selected' : ''}>${t}</option>`).join('')}</select>
-       <button class="btn" data-act="listadoPersonas">📋 Listado completo</button></div>
+    ctl: () => `<div class="filtros">${ctlBuscar('Buscar nombre, casa, teléfono…')}<button class="btn" data-act="listadoPersonas">📋 Listado</button></div>
+      <div class="filtros">
+        <select class="buscar" data-filter="tipoPersona" aria-label="Tipo de persona"><option value="">Todas las personas</option>${TIPOS_PERSONA.map(t => `<option ${t === state.tipoPersona ? 'selected' : ''}>${t}</option>`).join('')}</select>
+        <select class="buscar" data-filter="tipoIngreso" aria-label="Tipo de ingreso"><option value="">Todos los ingresos</option>${cfg.tiposIngreso.map(t => `<option ${t.nombre === state.tipoIngreso ? 'selected' : ''}>${esc(t.nombre)}</option>`).join('')}</select>
+      </div>
        <div class="seg">${ESTADOS_PAGO.map(([v, t]) => `<button class="chip ${state.estadoPago === v ? 'on' : ''}" data-act="estadoPago" data-id="${v}">${t}</button>`).join('')}</div>`
   },
   ingresos: {
@@ -193,18 +214,20 @@ async function listInicio() {
 /* ================= Personas ================= */
 async function listPersonas() {
   const [per, ing] = await Promise.all([all('personas'), all('ingresos')]);
-  const deud = {};
-  ing.forEach(r => { deud[r.personaId] = round2((deud[r.personaId] || 0) + deuda(r)); });
-  const L = per.filter(p => pasaFiltroPersona(p, deud[p.id] || 0)).sort(cmpCasa);
+  const m = adeudosPorPersona(ing), info = p => m[p.id] || SIN_INFO;
+  const L = per.filter(p => pasaFiltroPersona(p, info(p))).sort(cmpCasa);
   if (!L.length) return vacio(per.length ? 'Sin resultados para el filtro' : 'Aún no hay personas. Toca + para agregar.');
-  return `<p class="conteo">${L.length} persona(s)</p>` + L.map(p => `
-    <div class="card item" data-act="verPersona" data-id="${p.id}">
+  const total = sum(L, p => info(p).adeudo);
+  return `<p class="conteo">${L.length} persona(s)${total > 0 ? ` · Adeudo total <b class="neg">${money(total)}</b>` : ''}</p>` + L.map(p => {
+    const i = info(p), det = detalleAdeudo(i);
+    return `<div class="card item" data-act="verPersona" data-id="${p.id}">
       <div class="casa">${esc(p.numCasa || '—')}</div>
       <div class="info"><b>${esc(nombreCompleto(p))}</b>
-        <small>${esc(p.tipo)}${p.genero ? ' · ' + esc(p.genero) : ''}</small>
-        <small>${esc(p.telefono || '')}${p.email ? ' · ' + esc(p.email) : ''}</small></div>
-      ${deud[p.id] > 0 ? `<span class="badge neg">${money(deud[p.id])}</span>` : ''}
-    </div>`).join('');
+        <small>${esc(p.tipo)}${p.genero ? ' · ' + esc(p.genero) : ''}${p.telefono ? ' · ' + esc(p.telefono) : ''}</small>
+        ${det ? `<small class="${i.adeudo > 0 ? 'neg' : ''}">${i.adeudo > 0 ? 'Debe: ' : ''}${esc(det)}</small>` : ''}</div>
+      ${i.adeudo > 0 ? `<span class="badge neg">${money(i.adeudo)}</span>` : ''}
+    </div>`;
+  }).join('');
 }
 
 async function formPersona(p = {}) {
@@ -237,20 +260,20 @@ async function formPersona(p = {}) {
 
 /* ---- Listado completo de personas (tabla) ---- */
 const COLS_PERSONA = [['numCasa', 'Casa'], ['nombre', 'Nombre'], ['apPaterno', 'Apellido paterno'], ['apMaterno', 'Apellido materno'],
-  ['tipo', 'Tipo'], ['genero', 'Género'], ['telefono', 'Teléfono'], ['email', 'Email'], ['adeudo', 'Adeudo']];
+  ['tipo', 'Tipo'], ['genero', 'Género'], ['telefono', 'Teléfono'], ['email', 'Email'], ['detalle', 'Concepto del adeudo'], ['adeudo', 'Adeudo']];
 let ordenListado = 'numCasa';
 
 async function listadoPersonas(col) {
   if (typeof col === 'string' && col) ordenListado = col;
   const [per, ing] = await Promise.all([all('personas'), all('ingresos')]);
-  const deud = {};
-  ing.forEach(r => { deud[r.personaId] = round2((deud[r.personaId] || 0) + deuda(r)); });
-  per.forEach(p => { p.adeudo = deud[p.id] || 0; });
+  const m = adeudosPorPersona(ing);
+  per.forEach(p => { p.info = m[p.id] || SIN_INFO; p.adeudo = p.info.adeudo; p.detalle = detalleAdeudo(p.info); });
   const cmp = ordenListado === 'numCasa' ? cmpCasa
     : ordenListado === 'adeudo' ? (a, b) => b.adeudo - a.adeudo || cmpCasa(a, b)
     : (a, b) => String(a[ordenListado] || '').localeCompare(String(b[ordenListado] || ''), 'es', { numeric: true }) || cmpCasa(a, b);
-  const L = per.filter(p => pasaFiltroPersona(p, p.adeudo)).sort(cmp);
+  const L = per.filter(p => pasaFiltroPersona(p, p.info)).sort(cmp);
   const filtro = [state.estadoPago && ESTADOS_PAGO.find(e => e[0] === state.estadoPago)[1],
+    state.tipoIngreso && 'Ingreso: ' + state.tipoIngreso,
     state.tipoPersona && 'Tipo: ' + state.tipoPersona, state.q && `Búsqueda: "${state.q}"`].filter(Boolean).join(' · ');
   openModal(`<div class="print-area listado">
       <h2>Listado de personas</h2>
@@ -258,7 +281,8 @@ async function listadoPersonas(col) {
       <div class="tabla-wrap"><table class="tabla">
         <thead><tr><th>#</th>${COLS_PERSONA.map(([k, t]) => `<th data-act="listadoPersonas" data-id="${k}" class="${k === ordenListado ? 'ord' : ''}">${t}${k === ordenListado ? ' ▾' : ''}</th>`).join('')}</tr></thead>
         <tbody>${L.map((p, n) => `<tr data-act="verPersona" data-id="${p.id}"><td>${n + 1}</td>${COLS_PERSONA.map(([k]) =>
-          k === 'adeudo' ? `<td class="num ${p.adeudo > 0 ? 'neg' : ''}">${money(p.adeudo)}</td>` : `<td>${esc(p[k] || '')}</td>`).join('')}</tr>`).join('')
+          k === 'adeudo' ? `<td class="num ${p.adeudo > 0 ? 'neg' : ''}">${money(p.adeudo)}</td>`
+          : k === 'detalle' ? `<td class="detalle">${esc(p.detalle)}</td>` : `<td>${esc(p[k] || '')}</td>`).join('')}</tr>`).join('')
           || `<tr><td colspan="${COLS_PERSONA.length + 1}" class="vacio">Sin personas</td></tr>`}</tbody>
         ${L.length ? `<tfoot><tr><td colspan="${COLS_PERSONA.length}">Total adeudo</td><td class="num neg">${money(sum(L, 'adeudo'))}</td></tr></tfoot>` : ''}
       </table></div>
@@ -761,6 +785,7 @@ async function exportCSV(s) {
   if (s === 'personas') rows.sort(cmpCasa);
   const defs = {
     personas: [['Casa', 'numCasa'], ['Nombre', 'nombre'], ['Apellido paterno', 'apPaterno'], ['Apellido materno', 'apMaterno'], ['Tipo', 'tipo'], ['Género', 'genero'], ['Teléfono', 'telefono'], ['Email', 'email'],
+      ['Concepto del adeudo', p => Object.entries((adeudosPorPersona(ingresosDe(p.id), '')[p.id] || SIN_INFO).porTipo).map(([t, v]) => `${t} ${round2(v)}`).join('; ')],
       ['Adeudo', p => sum(ingresosDe(p.id), deuda)]],
     ingresos: [['Fecha', 'fecha'], ['Casa', r => pm[r.personaId]?.numCasa], ['Persona', r => nombreCompleto(pm[r.personaId])], ['Tipo', 'tipo'], ['Cantidad a aportar', 'cantidad'], ['Aportación', 'aportacion'], ['Adeudo', adeudoDe], ['Nota', 'nota']],
     gastos: [['Fecha', 'fecha'], ['Tipo de gasto', 'tipo'], ['Importe', 'importe'], ['Descripción', 'descripcion']],
