@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1f6f5c">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="CGI">
+  <title>CGI – Control de Aportaciones</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1 id="titulo">Inicio</h1>
+    <button id="btnConfig" class="icon-btn" aria-label="Configuración" data-act="config">⚙︎</button>
+  </header>
+
+  <main id="view"></main>
+
+  <button id="fab" class="fab" aria-label="Agregar" hidden>+</button>
+
+  <nav class="tabbar">
+    <button data-view="inicio"><i>🏠</i><span>Inicio</span></button>
+    <button data-view="personas"><i>👥</i><span>Personas</span></button>
+    <button data-view="ingresos"><i>💰</i><span>Ingresos</span></button>
+    <button data-view="gastos"><i>🧾</i><span>Gastos</span></button>
+    <button data-view="recibos"><i>📄</i><span>Recibos</span></button>
+  </nav>
+
+  <dialog id="modal"><div id="modalBody"></div></dialog>
+  <dialog id="padDlg">
+    <div class="pad-box">
+      <h2>Firma de quien recibe</h2>
+      <p class="nota">Firma con el dedo dentro del recuadro. Puedes girar el celular para tener más espacio.</p>
+      <canvas id="pad"></canvas>
+      <div class="acciones">
+        <button class="btn" data-act="padLimpiar">Limpiar</button>
+        <button class="btn" data-act="padCerrar">Cancelar</button>
+        <button class="btn primary" data-act="padGuardar">Guardar firma</button>
+      </div>
+    </div>
+  </dialog>
+  <div id="toast" role="status"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
