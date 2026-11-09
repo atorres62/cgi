@@ -5,7 +5,7 @@ const TIPOS_PERSONA = ['Titular', 'Arrendatario', 'Esposa', 'Hijo', 'Sobrino', '
 const GENEROS = ['Masculino', 'Femenino', 'Otro'];
 const DEF_TIPOS_INGRESO = ['Aportación mensual', 'Reparación de lámparas', 'Mantenimiento', 'Cuota extraordinaria'];
 const DEF_TIPOS_GASTO = ['Luz', 'Agua', 'Vigilancia', 'Jardinería', 'Reparación de lámparas', 'Limpieza', 'Papelería', 'Otro'];
-const STORES = ['personas', 'ingresos', 'gastos', 'recibos', 'config'];
+const STORES = ['personas', 'ingresos', 'gastos', 'recibos', 'config', 'comprobantes'];
 
 /* ================= Utilidades ================= */
 const $ = (s, el = document) => el.querySelector(s);
@@ -20,7 +20,10 @@ const folioTxt = n => String(n).padStart(5, '0');
 const norm = s => String(s ?? '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 const match = (q, ...vals) => !q || norm(vals.join(' ')).includes(norm(q.trim()));
 const sum = (arr, f) => round2(arr.reduce((a, r) => a + (+(typeof f === 'function' ? f(r) : r[f]) || 0), 0));
-const adeudoDe = i => round2((+i.cantidad || 0) - (+i.aportacion || 0)); // negativo = saldo a favor
+// Saldo a favor trasladado entre ingresos: favorDe = recibido de otros ingresos; favorA = entregado a otros ingresos.
+const favorAplicado = i => sum(i.favorDe || [], 'monto');
+const favorUsado = i => sum(i.favorA || [], 'monto');
+const adeudoDe = i => round2((+i.cantidad || 0) - (+i.aportacion || 0) - favorAplicado(i) + favorUsado(i)); // negativo = saldo a favor
 const deuda = i => Math.max(0, adeudoDe(i));
 const aFavor = i => Math.max(0, -adeudoDe(i));
 const txtAdeudo = a => a < 0 ? 'Saldo a favor: ' + money(-a) : 'Adeudo: ' + money(a);
@@ -34,12 +37,15 @@ const trimAll = d => Object.fromEntries(Object.entries(d).map(([k, v]) => [k, ty
 let db;
 function openDB() {
   return new Promise((res, rej) => {
-    const r = indexedDB.open('cgi-db', 1);
+    const r = indexedDB.open('cgi-db', 2);
     r.onupgradeneeded = () => {
       const d = r.result;
       for (const s of ['personas', 'ingresos', 'gastos', 'recibos'])
         if (!d.objectStoreNames.contains(s)) d.createObjectStore(s, { keyPath: 'id', autoIncrement: true });
       if (!d.objectStoreNames.contains('config')) d.createObjectStore('config', { keyPath: 'key' });
+      // v2: fotos de comprobantes de gasto, aparte para no cargar imágenes al listar gastos.
+      if (!d.objectStoreNames.contains('comprobantes'))
+        d.createObjectStore('comprobantes', { keyPath: 'id', autoIncrement: true }).createIndex('gastoId', 'gastoId');
     };
     r.onsuccess = () => res(r.result);
     r.onerror = () => rej(r.error);
@@ -336,19 +342,23 @@ async function listIngresos() {
       <div class="casa">${esc(p?.numCasa || '—')}</div>
       <div class="info"><b>${esc(nombreCompleto(p))}</b>
         <small>${esc(i.tipo)} · ${fmtFecha(i.fecha)}</small>
-        <small>A aportar ${money(i.cantidad)} · Aportado ${money(i.aportacion)}</small></div>
+        <small>A aportar ${money(i.cantidad)} · Aportado ${money(i.aportacion)}${favorAplicado(i) > 0 ? ' · Saldo a favor aplicado ' + money(favorAplicado(i)) : ''}</small></div>
       <span class="badge ${a > 0 ? 'neg' : 'pos'}">${a > 0 ? 'Debe ' + money(a) : a < 0 ? 'A favor ' + money(-a) : 'Pagado'}</span></div>`;
   }).join('');
 }
 
 async function formIngreso(i = {}) {
-  const per = (await all('personas')).sort(cmpCasa);
+  const [per, ingAll] = await Promise.all([all('personas').then(p => p.sort(cmpCasa)), all('ingresos')]);
   if (!per.length) { toast('Primero registra una persona'); go('personas'); return; }
   const nuevo = !i.id;
+  const favorDe = pid => nuevo && pid ? saldoFavorPersona(ingAll, pid) : 0;
+  const im = mapById(ingAll);
   let recibosHtml = '';
+  if (favorAplicado(i) > 0) recibosHtml += `<div class="edo"><h4>Saldo a favor aplicado: ${money(favorAplicado(i))}</h4><small>${detalleFavor(i, im)}</small></div>`;
+  if (favorUsado(i) > 0) recibosHtml += `<div class="edo"><h4>Saldo a favor trasladado a otras cuentas: ${money(favorUsado(i))}</h4><small>${(i.favorA || []).map(x => `${money(x.monto)} a ${esc(im[x.id]?.tipo || 'ingreso eliminado')} ${im[x.id] ? fmtFecha(im[x.id].fecha) : ''}`).join('<br>')}</small></div>`;
   if (!nuevo) {
     const rs = (await all('recibos')).filter(r => r.ingresoId === i.id).sort((a, b) => a.folio - b.folio);
-    if (rs.length) recibosHtml = `<div class="edo"><h4>Recibos emitidos</h4>${rs.map(r => `<div class="fila" data-act="verRecibo" data-id="${r.id}"><span>Folio ${folioTxt(r.folio)} · ${fmtFecha(r.fecha)}${r.cancelado ? ' · CANCELADO' : ''}</span><span>${money(r.importe)}</span></div>`).join('')}</div>`;
+    if (rs.length) recibosHtml += `<div class="edo"><h4>Recibos emitidos</h4>${rs.map(r => `<div class="fila" data-act="verRecibo" data-id="${r.id}"><span>Folio ${folioTxt(r.folio)} · ${fmtFecha(r.fecha)}${r.cancelado ? ' · CANCELADO' : ''}</span><span>${money(r.importe)}</span></div>`).join('')}</div>`;
   }
   const ad = nuevo ? 0 : adeudoDe(i);
   const tipo0 = i.tipo || cfg.tiposIngreso[0].nombre;
@@ -362,6 +372,7 @@ async function formIngreso(i = {}) {
     ${sel('Tipo de ingreso', 'tipo', cfg.tiposIngreso.map(t => t.nombre), tipo0)}
     <div class="row2">${fld('Cantidad a aportar', 'cantidad', cant0, num + (fijo ? ' readonly' : ''))}${fld(nuevo ? 'Aportación' : 'Aportado (usa Abonar)', 'aportacion', nuevo ? cant0 : i.aportacion, num + (nuevo ? '' : ' readonly'))}</div>
     <p class="nota" id="hintCant">${fijo ? 'Cantidad fija del tipo de ingreso (se cambia en ⚙︎ Configuración).' : 'Este tipo tiene monto variable: captura la cantidad.'}</p>
+    <p class="nota pos" id="hintFavor"></p>
     <div class="adeudo-live"><b id="adeudoLive">${txtAdeudo(ad)}</b></div>
     ${fld('Fecha de aportación', 'fecha', i.fecha || hoy(), 'type="date" required')}
     ${fld('Nota (opcional)', 'nota', i.nota)}
@@ -370,9 +381,14 @@ async function formIngreso(i = {}) {
   </form>`, async d => {
     const cantidad = round2(d.cantidad);
     const aportacion = nuevo ? round2(d.aportacion) : round2(i.aportacion);
-    const o = { ...i, personaId: Number(d.personaId), tipo: d.tipo, cantidad, aportacion, adeudo: round2(cantidad - aportacion), fecha: d.fecha, nota: d.nota.trim() };
+    const o = { ...i, personaId: Number(d.personaId), tipo: d.tipo, cantidad, aportacion, fecha: d.fecha, nota: d.nota.trim() };
+    o.adeudo = adeudoDe(o);
     if (nuevo) o.abonos = [];
     o.id = await put('ingresos', o);
+    if (nuevo) { // cuenta nueva: se le aplica el saldo a favor que tenga la persona
+      const cambiadas = aplicarSaldoFavor(o, ingAll);
+      if (cambiadas.length) { await put('ingresos', o); for (const s of cambiadas) await put('ingresos', s); }
+    }
     if (nuevo && aportacion > 0) {
       const r = await crearRecibo(o, per.find(x => x.id === o.personaId), aportacion, o.fecha);
       toast('Ingreso guardado · Recibo ' + folioTxt(r.folio));
@@ -381,17 +397,49 @@ async function formIngreso(i = {}) {
     toast('Ingreso guardado');
   });
   const f = $('#modalBody form');
-  const upd = () => { $('#adeudoLive').textContent = txtAdeudo(round2(f.cantidad.value) - round2(f.aportacion.value)); };
+  const upd = () => {
+    if (!nuevo) { $('#adeudoLive').textContent = txtAdeudo(round2(f.cantidad.value) - round2(f.aportacion.value) - favorAplicado(i) + favorUsado(i)); return; }
+    const fav = favorDe(Number(f.personaId.value)), pend = round2(f.cantidad.value) - round2(f.aportacion.value);
+    const aplica = round2(Math.min(fav, Math.max(0, pend)));
+    $('#hintFavor').textContent = fav > 0 ? `Saldo a favor disponible: ${money(fav)}. Se aplicará automáticamente a este ingreso.` : '';
+    $('#adeudoLive').textContent = txtAdeudo(round2(pend - aplica)) + (aplica > 0 ? ` (con ${money(aplica)} de saldo a favor)` : '');
+  };
+  // Aportación sugerida para un ingreso nuevo: lo que falta después de aplicar el saldo a favor.
+  const sugerir = () => { if (nuevo) f.aportacion.value = f.cantidad.value === '' ? '' : Math.max(0, round2(round2(f.cantidad.value) - favorDe(Number(f.personaId.value)))); };
   f.addEventListener('input', upd);
+  f.personaId.addEventListener('change', () => { sugerir(); upd(); });
   f.tipo.addEventListener('change', () => {
     const c = cantidadTipo(f.tipo.value);
     f.cantidad.readOnly = c > 0;
     f.cantidad.value = c > 0 ? c : '';
-    if (nuevo) f.aportacion.value = f.cantidad.value;
+    sugerir();
     $('#hintCant').textContent = c > 0 ? 'Cantidad fija del tipo de ingreso (se cambia en ⚙︎ Configuración).' : 'Este tipo tiene monto variable: captura la cantidad.';
     upd();
   });
 }
+
+/* ---- Saldo a favor: se aplica a la siguiente cuenta por pagar que se abre para la misma persona ---- */
+// Toma el saldo a favor de 'fuentes' (más antiguas primero) para cubrir el adeudo de 'destino' (que ya debe tener id).
+// Modifica los objetos en memoria y devuelve las fuentes que cambiaron (el llamador las guarda).
+function aplicarSaldoFavor(destino, fuentes) {
+  let pend = deuda(destino);
+  const cambiadas = [];
+  for (const s of [...fuentes].sort((a, b) => (a.fecha || '').localeCompare(b.fecha || '') || a.id - b.id)) {
+    if (pend <= 0) break;
+    if (s.id === destino.id || s.personaId !== destino.personaId) continue;
+    const m = round2(Math.min(aFavor(s), pend));
+    if (m <= 0) continue;
+    (s.favorA ||= []).push({ id: destino.id, monto: m, fecha: hoy() });
+    (destino.favorDe ||= []).push({ id: s.id, monto: m, fecha: hoy() });
+    s.adeudo = adeudoDe(s);
+    pend = round2(pend - m);
+    cambiadas.push(s);
+  }
+  destino.adeudo = adeudoDe(destino);
+  return cambiadas;
+}
+const saldoFavorPersona = (ing, pid) => sum(ing.filter(i => i.personaId === pid), aFavor);
+const detalleFavor = (i, im) => (i.favorDe || []).map(x => `${money(x.monto)} de ${esc(im[x.id]?.tipo || 'ingreso eliminado')} ${im[x.id] ? fmtFecha(im[x.id].fecha) : ''}`).join('<br>');
 
 async function abonar(id) {
   const i = await get('ingresos', id), ad = adeudoDe(i);
@@ -414,8 +462,20 @@ async function abonar(id) {
 }
 
 async function delIngreso(id) {
-  if (!confirm('¿Eliminar este ingreso? Sus recibos quedarán marcados como CANCELADOS.')) return;
+  const i = await get('ingresos', id);
+  const ligas = (i?.favorDe?.length || 0) + (i?.favorA?.length || 0);
+  if (!confirm('¿Eliminar este ingreso? Sus recibos quedarán marcados como CANCELADOS.'
+    + (ligas ? '\nEl saldo a favor que este ingreso recibió o entregó se regresará a su origen.' : ''))) return;
   for (const r of (await all('recibos')).filter(r => r.ingresoId === id)) { r.cancelado = true; await put('recibos', r); }
+  // Deshace los traslados de saldo a favor con otros ingresos.
+  for (const x of [...(i?.favorDe || []), ...(i?.favorA || [])]) {
+    const o = await get('ingresos', x.id);
+    if (!o) continue;
+    o.favorDe = (o.favorDe || []).filter(y => y.id !== id);
+    o.favorA = (o.favorA || []).filter(y => y.id !== id);
+    o.adeudo = adeudoDe(o);
+    await put('ingresos', o);
+  }
   await del('ingresos', id); closeModal(); toast('Ingreso eliminado'); renderList();
 }
 
@@ -436,7 +496,8 @@ async function generarCuentas() {
     const tipos = new FormData(f).getAll('tipos');
     if (!tipos.length) { toast('Elige al menos un tipo de ingreso'); return false; }
     const mes = d.fecha.slice(0, 7);
-    const existe = new Set((await all('ingresos')).filter(i => (i.fecha || '').startsWith(mes)).map(i => i.personaId + '|' + i.tipo));
+    const ingAll = await all('ingresos');
+    const existe = new Set(ingAll.filter(i => (i.fecha || '').startsWith(mes)).map(i => i.personaId + '|' + i.tipo));
     const nuevos = [];
     for (const p of activas) for (const t of fijos.filter(t => tipos.includes(t.nombre))) {
       if (existe.has(p.id + '|' + t.nombre)) continue;
@@ -444,10 +505,24 @@ async function generarCuentas() {
     }
     const omitidos = activas.length * tipos.length - nuevos.length;
     if (!nuevos.length) { alert(`No se generó nada: todas las personas activas ya tienen esos ingresos en ${mes}.`); return false; }
-    if (!confirm(`Se crearán ${nuevos.length} cuenta(s) por pagar por ${money(sum(nuevos, 'cantidad'))}${omitidos ? ` (se omiten ${omitidos} que ya existen en ese mes)` : ''}. ¿Continuar?`)) return false;
-    await tx('ingresos', 'readwrite', t => { const st = t.objectStore('ingresos'); nuevos.forEach(o => st.add(o)); });
+    const conFavor = new Set(nuevos.map(o => o.personaId).filter(pid => saldoFavorPersona(ingAll, pid) > 0)).size;
+    if (!confirm(`Se crearán ${nuevos.length} cuenta(s) por pagar por ${money(sum(nuevos, 'cantidad'))}${omitidos ? ` (se omiten ${omitidos} que ya existen en ese mes)` : ''}.`
+      + `${conFavor ? `\n${conFavor} persona(s) tienen saldo a favor: se les aplicará a estas cuentas.` : ''}\n¿Continuar?`)) return false;
+    // En una sola transacción: crea cada cuenta y, ya con su id, le aplica el saldo a favor de la persona.
+    let aplicado = 0;
+    await tx('ingresos', 'readwrite', t => {
+      const st = t.objectStore('ingresos');
+      for (const o of nuevos) {
+        const rq = st.add(o);
+        rq.onsuccess = () => {
+          o.id = rq.result;
+          const cambiadas = aplicarSaldoFavor(o, ingAll);
+          if (cambiadas.length) { aplicado = round2(aplicado + favorAplicado(o)); st.put(o); cambiadas.forEach(s => st.put(s)); }
+        };
+      }
+    });
     state.mes = mes; state.soloAdeudo = false; state.q = '';
-    toast(`${nuevos.length} cuenta(s) por pagar generada(s)`);
+    toast(`${nuevos.length} cuenta(s) por pagar generada(s)${aplicado ? ` · ${money(aplicado)} de saldo a favor aplicado` : ''}`);
     return () => render();
   });
 }
@@ -459,25 +534,94 @@ async function listGastos() {
   if (!L.length) return vacio(g.length ? 'Sin resultados para el filtro' : 'Aún no hay gastos. Toca + para registrar.');
   return resumen([['Total gastado', sum(L, 'importe'), 'neg']]) + L.map(x => `
     <div class="card item" data-act="editGasto" data-id="${x.id}">
-      <div class="info"><b>${esc(x.tipo)}</b><small>${fmtFecha(x.fecha)}${x.descripcion ? ' · ' + esc(x.descripcion) : ''}</small></div>
+      <div class="info"><b>${esc(x.tipo)}</b><small>${fmtFecha(x.fecha)}${x.descripcion ? ' · ' + esc(x.descripcion) : ''}</small>
+        <small class="${x.nComprobantes ? 'pos' : 'muted'}">${x.nComprobantes ? `📎 ${x.nComprobantes} comprobante(s)` : 'Sin comprobante'}</small></div>
       <span class="monto neg">${money(x.importe)}</span></div>`).join('');
 }
 
-function formGasto(g = {}) {
+/* ---- Comprobantes (fotos) de gastos ---- */
+const comprobantesDe = gastoId => tx('comprobantes', 'readonly', t => t.objectStore('comprobantes').index('gastoId').getAll(gastoId));
+
+// Reduce la foto (máx. 1600 px, JPEG) para que no ocupe demasiado en el celular ni en el respaldo.
+async function comprimirImagen(file, max = 1600) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image(); img.src = url; await img.decode();
+    const s = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement('canvas');
+    c.width = Math.round(img.naturalWidth * s); c.height = Math.round(img.naturalHeight * s);
+    const x = c.getContext('2d');
+    x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height);
+    x.drawImage(img, 0, 0, c.width, c.height);
+    return c.toDataURL('image/jpeg', 0.78);
+  } finally { URL.revokeObjectURL(url); }
+}
+
+function verImagen(src) {
+  const d = $('#imgDlg');
+  $('#imgDlg img').src = src;
+  d.showModal();
+}
+
+async function formGasto(g = {}) {
+  // fotos: comprobantes guardados (con id) y nuevos (sin id); borrar: ids a eliminar al guardar.
+  const fotos = g.id ? await comprobantesDe(g.id) : [], borrar = [];
   openModal(`<form><h2>${g.id ? 'Editar' : 'Registrar'} gasto</h2>
     ${sel('Tipo de gasto', 'tipo', cfg.tiposGasto, g.tipo || cfg.tiposGasto[0])}
     <div class="row2">${fld('Fecha', 'fecha', g.fecha || hoy(), 'type="date" required')}${fld('Importe gastado', 'importe', g.importe, 'type="number" step="0.01" min="0.01" inputmode="decimal" required')}</div>
     ${fld('Descripción / proveedor (opcional)', 'descripcion', g.descripcion)}
+    <label>Comprobantes (foto del ticket o factura)</label>
+    <div id="fotosGasto" class="fotos"></div>
+    <div class="botones">
+      <button type="button" class="btn" id="btnCamara">📷 Tomar foto</button>
+      <button type="button" class="btn" id="btnGaleria">🖼 Elegir imagen</button>
+    </div>
+    <input type="file" id="inCamara" accept="image/*" capture="environment" hidden>
+    <input type="file" id="inGaleria" accept="image/*" multiple hidden>
     ${botones('delGasto', g.id)}
   </form>`, async d => {
-    await put('gastos', { ...g, tipo: d.tipo, fecha: d.fecha, importe: round2(d.importe), descripcion: d.descripcion.trim() });
-    toast('Gasto guardado');
+    const o = { ...g, tipo: d.tipo, fecha: d.fecha, importe: round2(d.importe), descripcion: d.descripcion.trim(), nComprobantes: fotos.length };
+    o.id = await put('gastos', o);
+    await tx('comprobantes', 'readwrite', t => {
+      const st = t.objectStore('comprobantes');
+      borrar.forEach(id => st.delete(id));
+      fotos.filter(f => !f.id).forEach(f => st.add({ gastoId: o.id, img: f.img, nombre: f.nombre, fecha: hoy() }));
+    });
+    toast('Gasto guardado' + (fotos.length ? ` · ${fotos.length} comprobante(s)` : ''));
   });
+  const pintar = () => {
+    $('#fotosGasto').innerHTML = fotos.map((f, k) => `<div class="foto"><img src="${f.img}" alt="Comprobante ${k + 1}" data-k="${k}">
+      <button type="button" class="quitar" data-k="${k}" aria-label="Quitar">✕</button></div>`).join('') || '<p class="nota">Sin comprobantes.</p>';
+  };
+  pintar();
+  $('#fotosGasto').addEventListener('click', e => {
+    const k = +e.target.dataset.k;
+    if (e.target.matches('.quitar')) {
+      if (!confirm('¿Quitar este comprobante?')) return;
+      const [f] = fotos.splice(k, 1); if (f.id) borrar.push(f.id); pintar();
+    } else if (e.target.matches('img')) verImagen(fotos[k].img);
+  });
+  const agregar = async inp => {
+    for (const file of inp.files) {
+      try { fotos.push({ img: await comprimirImagen(file), nombre: file.name }); }
+      catch { toast('No se pudo leer la imagen ' + file.name); }
+    }
+    inp.value = ''; pintar();
+  };
+  $('#btnCamara').onclick = () => $('#inCamara').click();
+  $('#btnGaleria').onclick = () => $('#inGaleria').click();
+  $('#inCamara').onchange = e => agregar(e.target);
+  $('#inGaleria').onchange = e => agregar(e.target);
 }
 
 async function delGasto(id) {
-  if (!confirm('¿Eliminar este gasto?')) return;
-  await del('gastos', id); closeModal(); toast('Gasto eliminado'); renderList();
+  if (!confirm('¿Eliminar este gasto y sus comprobantes?')) return;
+  const fotos = await comprobantesDe(id);
+  await tx(['gastos', 'comprobantes'], 'readwrite', t => {
+    t.objectStore('gastos').delete(id);
+    fotos.forEach(f => t.objectStore('comprobantes').delete(f.id));
+  });
+  closeModal(); toast('Gasto eliminado'); renderList();
 }
 
 /* ================= Recibos ================= */
@@ -890,8 +1034,8 @@ async function exportCSV(s) {
     personas: [['Casa', 'numCasa'], ['Nombre', 'nombre'], ['Apellido paterno', 'apPaterno'], ['Apellido materno', 'apMaterno'], ['Tipo', 'tipo'], ['Género', 'genero'], ['Teléfono', 'telefono'], ['Email', 'email'], ['Activo', p => esActiva(p) ? 'Sí' : 'No'],
       ['Concepto del adeudo', p => Object.entries((adeudosPorPersona(ingresosDe(p.id), '')[p.id] || SIN_INFO).porTipo).map(([t, v]) => `${t} ${round2(v)}`).join('; ')],
       ['Adeudo', p => sum(ingresosDe(p.id), deuda)]],
-    ingresos: [['Fecha', 'fecha'], ['Casa', r => pm[r.personaId]?.numCasa], ['Persona', r => nombreCompleto(pm[r.personaId])], ['Tipo', 'tipo'], ['Cantidad a aportar', 'cantidad'], ['Aportación', 'aportacion'], ['Adeudo', adeudoDe], ['Nota', 'nota']],
-    gastos: [['Fecha', 'fecha'], ['Tipo de gasto', 'tipo'], ['Importe', 'importe'], ['Descripción', 'descripcion']],
+    ingresos: [['Fecha', 'fecha'], ['Casa', r => pm[r.personaId]?.numCasa], ['Persona', r => nombreCompleto(pm[r.personaId])], ['Tipo', 'tipo'], ['Cantidad a aportar', 'cantidad'], ['Aportación', 'aportacion'], ['Saldo a favor aplicado', favorAplicado], ['Saldo a favor trasladado', favorUsado], ['Adeudo', adeudoDe], ['Nota', 'nota']],
+    gastos: [['Fecha', 'fecha'], ['Tipo de gasto', 'tipo'], ['Importe', 'importe'], ['Descripción', 'descripcion'], ['Comprobantes', r => r.nComprobantes || 0]],
     recibos: [['Folio', r => folioTxt(r.folio)], ['UUID', 'uuid'], ['Fecha', 'fecha'], ['Nombre', 'nombre'], ['Casa', 'casa'], ['Concepto', 'concepto'], ['Importe recibido', 'importe'], ['Adeudo', 'adeudo'], ['Recibió', r => quienRecibe(r).nombre], ['Cargo', r => quienRecibe(r).cargo], ['Cancelado', r => r.cancelado ? 'Sí' : ''], ['Fecha cancelación', 'fechaCancelacion'], ['Motivo cancelación', 'motivoCancelacion']],
   }[s];
   const cell = v => { v = String(v ?? ''); return /[",\n\r;]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };

@@ -1,6 +1,6 @@
 // Service worker: permite usar la app sin internet.
 // Al publicar cambios, incrementa la versión para que los celulares descarguen la nueva.
-const CACHE = 'cgi-v14';
+const CACHE = 'cgi-v15';
 const ASSETS = ['./', 'index.html', 'styles.css', 'app.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', e => {

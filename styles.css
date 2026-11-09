@@ -166,3 +166,13 @@ dialog.ancho { width: min(1100px, calc(100% - 12px)); }
 .card.inactiva { opacity: .6; }
 .info .badge { background: var(--line); color: var(--muted); font-size: .7rem; padding: 2px 6px; vertical-align: middle; }
 .lista-check { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 12px; }
+
+/* Comprobantes de gastos */
+.fotos { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 8px; }
+.foto { position: relative; width: 84px; height: 84px; border-radius: 10px; overflow: hidden; border: 1px solid var(--line); background: #fff; }
+.foto img { width: 100%; height: 100%; object-fit: cover; cursor: zoom-in; }
+.foto .quitar { position: absolute; top: 3px; right: 3px; width: 24px; height: 24px; border-radius: 50%; border: 0; background: rgba(0,0,0,.6); color: #fff; font-size: 13px; line-height: 24px; padding: 0; cursor: pointer; }
+.img-dlg { padding: 8px; max-width: 96vw; max-height: 94vh; text-align: center; }
+.img-dlg img { max-width: 92vw; max-height: 84vh; display: block; margin: 0 auto; }
+.img-dlg .nota { margin: 6px 0 0; }
+.info small.muted { color: var(--muted); }
