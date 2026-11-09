@@ -1094,5 +1094,10 @@ $('#fab').addEventListener('click', () => VIEWS[state.view].fab?.());
   } catch (e) {
     $('#view').innerHTML = vacio('Error al abrir la base de datos: ' + esc(e.message));
   }
-  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js');
+  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+    // Al instalarse una versión nueva, recarga una vez para mostrarla (no en la primera instalación).
+    const habia = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (habia) location.reload(); }, { once: true });
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' });
+  }
 })();

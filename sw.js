@@ -1,10 +1,11 @@
 // Service worker: permite usar la app sin internet.
 // Al publicar cambios, incrementa la versión para que los celulares descarguen la nueva.
-const CACHE = 'cgi-v16';
+const CACHE = 'cgi-v17';
 const ASSETS = ['./', 'index.html', 'styles.css', 'app.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  // cache: 'reload' evita tomar archivos viejos de la caché HTTP del navegador.
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS.map(u => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', e => {
