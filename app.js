@@ -109,6 +109,8 @@ const detalleAdeudo = info => Object.entries(info.porTipo).map(([t, v]) => `${t}
 // Filtros de la pestaña Personas (también los usa el listado completo).
 // Con un tipo de ingreso elegido, "Pagados" exige que la persona tenga registrado ese ingreso.
 const esActiva = p => p.activo !== false; // las personas registradas antes de este campo se consideran activas
+// El adeudo de personas inactivas no participa en totales ni en la lista de adeudos pendientes.
+const deudaActiva = pm => i => esActiva(pm[i.personaId] || {}) ? deuda(i) : 0;
 const ESTADOS_ACTIVO = [['', 'Activas e inactivas'], ['si', 'Solo activas'], ['no', 'Solo inactivas']];
 const pasaFiltroPersona = (p, info) => (!state.tipoPersona || p.tipo === state.tipoPersona)
   && (!state.activo || esActiva(p) === (state.activo === 'si'))
@@ -208,11 +210,11 @@ async function listInicio() {
     return Object.entries(m).sort((a, b) => b[1] - a[1]);
   };
   const deud = {};
-  ing.forEach(r => { const a = adeudoDe(r); if (a > 0) deud[r.personaId] = round2((deud[r.personaId] || 0) + a); });
+  ing.forEach(r => { const a = deudaActiva(pm)(r); if (a > 0) deud[r.personaId] = round2((deud[r.personaId] || 0) + a); });
   const deudores = Object.entries(deud).sort((a, b) => b[1] - a[1]);
   return avisoRespaldo(per.length + ing.length + gas.length) + `<div class="kpis">
       ${kpi('Ingresos', totI, 'pos')}${kpi('Gastos', totG, 'neg')}
-      ${kpi('Balance del periodo', round2(totI - totG))}${kpi('Adeudo del periodo', sum(i, deuda), 'neg')}
+      ${kpi('Balance del periodo', round2(totI - totG))}${kpi('Adeudo del periodo', sum(i, deudaActiva(pm)), 'neg')}
     </div>
     <div class="card caja"><span>Saldo en caja (histórico)</span><strong class="${caja < 0 ? 'neg' : ''}">${money(caja)}</strong></div>
     ${tablaTipo('Ingresos por tipo', porTipo(i, 'aportacion'))}
@@ -242,7 +244,7 @@ async function listPersonas() {
   const m = adeudosPorPersona(ing), info = p => m[p.id] || SIN_INFO;
   const L = per.filter(p => pasaFiltroPersona(p, info(p))).sort(cmpCasa);
   if (!L.length) return vacio(per.length ? 'Sin resultados para el filtro' : 'Aún no hay personas. Toca + para agregar.');
-  const total = sum(L, p => info(p).adeudo);
+  const total = sum(L.filter(esActiva), p => info(p).adeudo);
   return `<p class="conteo">${L.length} persona(s)${total > 0 ? ` · Adeudo total <b class="neg">${money(total)}</b>` : ''}</p>` + L.map(p => {
     const i = info(p), det = detalleAdeudo(i);
     return `<div class="card item ${esActiva(p) ? '' : 'inactiva'}" data-act="verPersona" data-id="${p.id}">
@@ -310,7 +312,7 @@ async function listadoPersonas(col) {
           k === 'adeudo' ? `<td class="num ${p.adeudo > 0 ? 'neg' : ''}">${money(p.adeudo)}</td>`
           : k === 'detalle' ? `<td class="detalle">${esc(p.detalle)}</td>` : `<td>${esc(p[k] || '')}</td>`).join('')}</tr>`).join('')
           || `<tr><td colspan="${COLS_PERSONA.length + 1}" class="vacio">Sin personas</td></tr>`}</tbody>
-        ${L.length ? `<tfoot><tr><td colspan="${COLS_PERSONA.length}">Total adeudo</td><td class="num neg">${money(sum(L, 'adeudo'))}</td></tr></tfoot>` : ''}
+        ${L.length ? `<tfoot><tr><td colspan="${COLS_PERSONA.length}">Total adeudo</td><td class="num neg">${money(sum(L.filter(esActiva), 'adeudo'))}</td></tr></tfoot>` : ''}
       </table></div>
       <p class="nota no-print">Toca el encabezado de una columna para ordenar, o una fila para editar a la persona.</p>
     </div>
@@ -336,7 +338,7 @@ async function listIngresos() {
   const L = ing.filter(i => enMes(i) && (!state.soloAdeudo || adeudoDe(i) > 0)
     && match(state.q, nombreCompleto(pm[i.personaId]), pm[i.personaId]?.numCasa, i.tipo, i.nota)).sort(byFechaDesc);
   if (!L.length) return vacio(ing.length ? 'Sin resultados para el filtro' : 'Aún no hay ingresos. Toca + para registrar.');
-  return resumen([['Aportado', sum(L, 'aportacion'), 'pos'], ['Adeudo', sum(L, deuda), 'neg']]) + L.map(i => {
+  return resumen([['Aportado', sum(L, 'aportacion'), 'pos'], ['Adeudo', sum(L, deudaActiva(pm)), 'neg']]) + L.map(i => {
     const p = pm[i.personaId], a = adeudoDe(i);
     return `<div class="card item" data-act="editIngreso" data-id="${i.id}">
       <div class="casa">${esc(p?.numCasa || '—')}</div>

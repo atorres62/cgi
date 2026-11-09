@@ -10,7 +10,7 @@ No necesita servidor de base de datos ni tienda de aplicaciones.
 | **Ingresos** | Tipo (aportación mensual, reparación de lámparas, etc.), cantidad a aportar (tomada del tipo de ingreso), aportación, **adeudo = cantidad a aportar − aportación**, fecha. Si se aporta de más, la diferencia aparece como **saldo a favor** y se aplica automáticamente a la siguiente cuenta por pagar que se abra para esa persona. Botón **Abonar** para pagar el adeudo después. Botón **🧾 Cuentas por pagar**: crea un cargo a cada persona activa por cada tipo de ingreso con cantidad fija (sin duplicar si ya existe en ese mes). |
 | **Gastos** | Tipo de gasto, fecha, importe gastado, descripción y **comprobantes**: fotos del ticket o factura (tomadas con la cámara o elegidas de la galería). |
 | **Recibos** | Se generan solos al registrar un ingreso o un abono: folio consecutivo, fecha, nombre, concepto/tipo, importe y adeudo. Se pueden imprimir/guardar como PDF, o **enviar por WhatsApp como imagen** (con la firma). Botón **🔎 Folio** para consultar un recibo por su número. **Cancelar recibo** regresa el importe al adeudo del ingreso; el folio queda marcado como CANCELADO y no se vuelve a usar. |
-| **Inicio** | Totales del mes (o de todo el periodo), saldo en caja y lista de adeudos. |
+| **Inicio** | Totales del mes (o de todo el periodo), saldo en caja y lista de adeudos. El adeudo de personas inactivas no se suma en los totales ni aparece en la lista de adeudos. |
 
 En ⚙︎ **Configuración**: nombre de la asociación, **persona que recibe con su cargo y su firma digital**
 (dibujada con el dedo o desde una foto de la firma en papel; aparecen en los recibos), tipos de ingreso con su **cantidad a aportar**
