@@ -80,7 +80,7 @@ const tipoIng = nombre => cfg.tiposIngreso.find(t => t.nombre === nombre);
 const cantidadTipo = nombre => +tipoIng(nombre)?.cantidad || 0;
 
 /* ================= Estado y navegación ================= */
-const state = { view: 'inicio', mes: hoy().slice(0, 7), q: '', soloAdeudo: false, tipoPersona: '', estadoPago: '', tipoIngreso: '' };
+const state = { view: 'inicio', mes: hoy().slice(0, 7), q: '', soloAdeudo: false, tipoPersona: '', estadoPago: '', tipoIngreso: '', activo: '' };
 const ESTADOS_PAGO = [['', 'Todos'], ['adeudo', 'Con adeudo'], ['pagados', 'Pagados']];
 
 // Resumen de adeudos por persona: { adeudo, n (ingresos registrados), porTipo: {tipo: importe} }.
@@ -102,7 +102,10 @@ const detalleAdeudo = info => Object.entries(info.porTipo).map(([t, v]) => `${t}
 
 // Filtros de la pestaña Personas (también los usa el listado completo).
 // Con un tipo de ingreso elegido, "Pagados" exige que la persona tenga registrado ese ingreso.
+const esActiva = p => p.activo !== false; // las personas registradas antes de este campo se consideran activas
+const ESTADOS_ACTIVO = [['', 'Activas e inactivas'], ['si', 'Solo activas'], ['no', 'Solo inactivas']];
 const pasaFiltroPersona = (p, info) => (!state.tipoPersona || p.tipo === state.tipoPersona)
+  && (!state.activo || esActiva(p) === (state.activo === 'si'))
   && (!state.estadoPago || (state.estadoPago === 'adeudo' ? info.adeudo > 0 : info.adeudo <= 0 && (!state.tipoIngreso || info.n > 0)))
   && match(state.q, nombreCompleto(p), p.numCasa, p.telefono, p.email, p.tipo);
 const enMes = r => !state.mes || (r.fecha || '').startsWith(state.mes);
@@ -121,11 +124,12 @@ const VIEWS = {
         <select class="buscar" data-filter="tipoPersona" aria-label="Tipo de persona"><option value="">Todas las personas</option>${TIPOS_PERSONA.map(t => `<option ${t === state.tipoPersona ? 'selected' : ''}>${t}</option>`).join('')}</select>
         <select class="buscar" data-filter="tipoIngreso" aria-label="Tipo de ingreso"><option value="">Todos los ingresos</option>${cfg.tiposIngreso.map(t => `<option ${t.nombre === state.tipoIngreso ? 'selected' : ''}>${esc(t.nombre)}</option>`).join('')}</select>
       </div>
+      <div class="filtros"><select class="buscar" data-filter="activo" aria-label="Activas">${ESTADOS_ACTIVO.map(([v, t]) => `<option value="${v}" ${state.activo === v ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
        <div class="seg">${ESTADOS_PAGO.map(([v, t]) => `<button class="chip ${state.estadoPago === v ? 'on' : ''}" data-act="estadoPago" data-id="${v}">${t}</button>`).join('')}</div>`
   },
   ingresos: {
     t: 'Ingresos', list: listIngresos, fab: () => formIngreso(),
-    ctl: () => ctlMes() + ctlBuscar('Buscar persona, casa, tipo…') +
+    ctl: () => ctlMes() + `<div class="filtros">${ctlBuscar('Buscar persona, casa, tipo…')}<button class="btn" data-act="generarCuentas">🧾 Cuentas por pagar</button></div>` +
       `<label class="check"><input type="checkbox" data-filter="soloAdeudo" ${state.soloAdeudo ? 'checked' : ''}> Solo con adeudo</label>`
   },
   gastos: { t: 'Gastos', list: listGastos, fab: () => formGasto(), ctl: () => ctlMes() + ctlBuscar('Buscar tipo o descripción…') },
@@ -235,9 +239,9 @@ async function listPersonas() {
   const total = sum(L, p => info(p).adeudo);
   return `<p class="conteo">${L.length} persona(s)${total > 0 ? ` · Adeudo total <b class="neg">${money(total)}</b>` : ''}</p>` + L.map(p => {
     const i = info(p), det = detalleAdeudo(i);
-    return `<div class="card item" data-act="verPersona" data-id="${p.id}">
+    return `<div class="card item ${esActiva(p) ? '' : 'inactiva'}" data-act="verPersona" data-id="${p.id}">
       <div class="casa">${esc(p.numCasa || '—')}</div>
-      <div class="info"><b>${esc(nombreCompleto(p))}</b>
+      <div class="info"><b>${esc(nombreCompleto(p))}${esActiva(p) ? '' : ' <span class="badge">Inactiva</span>'}</b>
         <small>${esc(p.tipo)}${p.genero ? ' · ' + esc(p.genero) : ''}${p.telefono ? ' · ' + esc(p.telefono) : ''}</small>
         ${det ? `<small class="${i.adeudo > 0 ? 'neg' : ''}">${i.adeudo > 0 ? 'Debe: ' : ''}${esc(det)}</small>` : ''}</div>
       ${i.adeudo > 0 ? `<span class="badge neg">${money(i.adeudo)}</span>` : ''}
@@ -265,31 +269,32 @@ async function formPersona(p = {}) {
     ${sel('Género', 'genero', GENEROS, p.genero, true)}
     ${fld('Teléfono', 'telefono', p.telefono, 'type="tel" inputmode="tel"')}
     ${fld('Email', 'email', p.email, 'type="email" inputmode="email"')}
+    <label class="check"><input type="checkbox" name="activo" ${esActiva(p) ? 'checked' : ''}> Activo (se le generan cuentas por pagar)</label>
     ${extra}
     ${botones('delPersona', p.id)}
   </form>`, async d => {
-    await put('personas', { ...p, ...trimAll(d) });
+    await put('personas', { ...p, ...trimAll(d), activo: d.activo === 'on' });
     toast('Persona guardada');
   });
 }
 
 /* ---- Listado completo de personas (tabla) ---- */
 const COLS_PERSONA = [['numCasa', 'Casa'], ['nombre', 'Nombre'], ['apPaterno', 'Apellido paterno'], ['apMaterno', 'Apellido materno'],
-  ['tipo', 'Tipo'], ['genero', 'Género'], ['telefono', 'Teléfono'], ['email', 'Email'], ['detalle', 'Concepto del adeudo'], ['adeudo', 'Adeudo']];
+  ['tipo', 'Tipo'], ['genero', 'Género'], ['telefono', 'Teléfono'], ['email', 'Email'], ['activoTxt', 'Activo'], ['detalle', 'Concepto del adeudo'], ['adeudo', 'Adeudo']];
 let ordenListado = 'numCasa';
 
 async function listadoPersonas(col) {
   if (typeof col === 'string' && col) ordenListado = col;
   const [per, ing] = await Promise.all([all('personas'), all('ingresos')]);
   const m = adeudosPorPersona(ing);
-  per.forEach(p => { p.info = m[p.id] || SIN_INFO; p.adeudo = p.info.adeudo; p.detalle = detalleAdeudo(p.info); });
+  per.forEach(p => { p.info = m[p.id] || SIN_INFO; p.adeudo = p.info.adeudo; p.detalle = detalleAdeudo(p.info); p.activoTxt = esActiva(p) ? 'Sí' : 'No'; });
   const cmp = ordenListado === 'numCasa' ? cmpCasa
     : ordenListado === 'adeudo' ? (a, b) => b.adeudo - a.adeudo || cmpCasa(a, b)
     : (a, b) => String(a[ordenListado] || '').localeCompare(String(b[ordenListado] || ''), 'es', { numeric: true }) || cmpCasa(a, b);
   const L = per.filter(p => pasaFiltroPersona(p, p.info)).sort(cmp);
   const filtro = [state.estadoPago && ESTADOS_PAGO.find(e => e[0] === state.estadoPago)[1],
     state.tipoIngreso && 'Ingreso: ' + state.tipoIngreso,
-    state.tipoPersona && 'Tipo: ' + state.tipoPersona, state.q && `Búsqueda: "${state.q}"`].filter(Boolean).join(' · ');
+    state.tipoPersona && 'Tipo: ' + state.tipoPersona, state.activo && ESTADOS_ACTIVO.find(e => e[0] === state.activo)[1], state.q && `Búsqueda: "${state.q}"`].filter(Boolean).join(' · ');
   openModal(`<div class="print-area listado">
       <h2>Listado de personas</h2>
       <p class="nota">${esc(cfg.org)} · ${L.length} persona(s) · ${fmtFecha(hoy())}${filtro ? ' · ' + esc(filtro) : ''}</p>
@@ -353,7 +358,7 @@ async function formIngreso(i = {}) {
   openModal(`<form>
     <h2>${nuevo ? 'Registrar' : 'Editar'} ingreso</h2>
     <label>Persona<select name="personaId" required><option value="">Selecciona…</option>
-      ${per.map(p => `<option value="${p.id}" ${p.id === i.personaId ? 'selected' : ''}>Casa ${esc(p.numCasa)} – ${esc(nombreCompleto(p))}</option>`).join('')}</select></label>
+      ${per.filter(p => esActiva(p) || p.id === i.personaId).map(p => `<option value="${p.id}" ${p.id === i.personaId ? 'selected' : ''}>Casa ${esc(p.numCasa)} – ${esc(nombreCompleto(p))}${esActiva(p) ? '' : ' (inactiva)'}</option>`).join('')}</select></label>
     ${sel('Tipo de ingreso', 'tipo', cfg.tiposIngreso.map(t => t.nombre), tipo0)}
     <div class="row2">${fld('Cantidad a aportar', 'cantidad', cant0, num + (fijo ? ' readonly' : ''))}${fld(nuevo ? 'Aportación' : 'Aportado (usa Abonar)', 'aportacion', nuevo ? cant0 : i.aportacion, num + (nuevo ? '' : ' readonly'))}</div>
     <p class="nota" id="hintCant">${fijo ? 'Cantidad fija del tipo de ingreso (se cambia en ⚙︎ Configuración).' : 'Este tipo tiene monto variable: captura la cantidad.'}</p>
@@ -412,6 +417,39 @@ async function delIngreso(id) {
   if (!confirm('¿Eliminar este ingreso? Sus recibos quedarán marcados como CANCELADOS.')) return;
   for (const r of (await all('recibos')).filter(r => r.ingresoId === id)) { r.cancelado = true; await put('recibos', r); }
   await del('ingresos', id); closeModal(); toast('Ingreso eliminado'); renderList();
+}
+
+/* ---- Cuentas por pagar: un cargo (ingreso con aportación 0) por persona activa y tipo de ingreso con cantidad fija ---- */
+async function generarCuentas() {
+  const fijos = cfg.tiposIngreso.filter(t => +t.cantidad > 0);
+  if (!fijos.length) { alert('No hay tipos de ingreso con cantidad fija. Asígnales una cantidad en ⚙︎ Configuración.'); return; }
+  const activas = (await all('personas')).filter(esActiva);
+  if (!activas.length) { alert('No hay personas activas.'); return; }
+  openModal(`<form><h2>Generar cuentas por pagar</h2>
+    <p class="nota">Se creará un cargo a cada una de las <b>${activas.length} persona(s) activa(s)</b> por cada tipo de ingreso elegido, con aportación $0 (todo queda como adeudo).
+      Si la persona ya tiene ese tipo de ingreso en el mismo mes, no se duplica.</p>
+    <label>Tipos de ingreso (cantidad fija)</label>
+    <div class="lista-check">${fijos.map(t => `<label class="check"><input type="checkbox" name="tipos" value="${esc(t.nombre)}" checked> ${esc(t.nombre)} · ${money(t.cantidad)}</label>`).join('')}</div>
+    ${fld('Fecha del cargo', 'fecha', hoy(), 'type="date" required')}
+    <div class="acciones"><button type="button" class="btn" data-act="close">Cancelar</button><button class="btn primary">Generar</button></div>
+  </form>`, async (d, f) => {
+    const tipos = new FormData(f).getAll('tipos');
+    if (!tipos.length) { toast('Elige al menos un tipo de ingreso'); return false; }
+    const mes = d.fecha.slice(0, 7);
+    const existe = new Set((await all('ingresos')).filter(i => (i.fecha || '').startsWith(mes)).map(i => i.personaId + '|' + i.tipo));
+    const nuevos = [];
+    for (const p of activas) for (const t of fijos.filter(t => tipos.includes(t.nombre))) {
+      if (existe.has(p.id + '|' + t.nombre)) continue;
+      nuevos.push({ personaId: p.id, tipo: t.nombre, cantidad: round2(t.cantidad), aportacion: 0, adeudo: round2(t.cantidad), fecha: d.fecha, nota: 'Cuenta por pagar generada' });
+    }
+    const omitidos = activas.length * tipos.length - nuevos.length;
+    if (!nuevos.length) { alert(`No se generó nada: todas las personas activas ya tienen esos ingresos en ${mes}.`); return false; }
+    if (!confirm(`Se crearán ${nuevos.length} cuenta(s) por pagar por ${money(sum(nuevos, 'cantidad'))}${omitidos ? ` (se omiten ${omitidos} que ya existen en ese mes)` : ''}. ¿Continuar?`)) return false;
+    await tx('ingresos', 'readwrite', t => { const st = t.objectStore('ingresos'); nuevos.forEach(o => st.add(o)); });
+    state.mes = mes; state.soloAdeudo = false; state.q = '';
+    toast(`${nuevos.length} cuenta(s) por pagar generada(s)`);
+    return () => render();
+  });
 }
 
 /* ================= Gastos ================= */
@@ -849,7 +887,7 @@ async function exportCSV(s) {
   const ingresosDe = pid => ing.filter(i => i.personaId === pid);
   if (s === 'personas') rows.sort(cmpCasa);
   const defs = {
-    personas: [['Casa', 'numCasa'], ['Nombre', 'nombre'], ['Apellido paterno', 'apPaterno'], ['Apellido materno', 'apMaterno'], ['Tipo', 'tipo'], ['Género', 'genero'], ['Teléfono', 'telefono'], ['Email', 'email'],
+    personas: [['Casa', 'numCasa'], ['Nombre', 'nombre'], ['Apellido paterno', 'apPaterno'], ['Apellido materno', 'apMaterno'], ['Tipo', 'tipo'], ['Género', 'genero'], ['Teléfono', 'telefono'], ['Email', 'email'], ['Activo', p => esActiva(p) ? 'Sí' : 'No'],
       ['Concepto del adeudo', p => Object.entries((adeudosPorPersona(ingresosDe(p.id), '')[p.id] || SIN_INFO).porTipo).map(([t, v]) => `${t} ${round2(v)}`).join('; ')],
       ['Adeudo', p => sum(ingresosDe(p.id), deuda)]],
     ingresos: [['Fecha', 'fecha'], ['Casa', r => pm[r.personaId]?.numCasa], ['Persona', r => nombreCompleto(pm[r.personaId])], ['Tipo', 'tipo'], ['Cantidad a aportar', 'cantidad'], ['Aportación', 'aportacion'], ['Adeudo', adeudoDe], ['Nota', 'nota']],
@@ -870,7 +908,7 @@ const ACT = {
   verPersona: async id => formPersona(await get('personas', id)),
   editIngreso: async id => formIngreso(await get('ingresos', id)),
   editGasto: async id => formGasto(await get('gastos', id)),
-  delPersona, delIngreso, delGasto, abonar, verRecibo, compartirRecibo, listadoPersonas, buscarFolio, cancelarRecibo,
+  delPersona, delIngreso, delGasto, abonar, verRecibo, compartirRecibo, listadoPersonas, buscarFolio, cancelarRecibo, generarCuentas,
   print: () => window.print(),
   addTipoIng: () => { $('#tiposIng').insertAdjacentHTML('beforeend', rowTipo({ nombre: '', cantidad: 0 })); $('#tiposIng .tipo-row:last-child input').focus(); },
   delRow: (_, el) => el.closest('.tipo-row').remove(),
